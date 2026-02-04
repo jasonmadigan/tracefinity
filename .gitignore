@@ -1,0 +1,46 @@
+# dependencies
+node_modules/
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# build
+.next/
+dist/
+build/
+*.egg-info/
+tsconfig.tsbuildinfo
+
+# storage
+backend/storage/uploads/*
+backend/storage/processed/*
+backend/storage/outputs/*
+backend/storage/debug/
+backend/storage/sessions.json
+storage/
+!backend/storage/uploads/.gitkeep
+!backend/storage/processed/.gitkeep
+!backend/storage/outputs/.gitkeep
+
+# env
+.env
+.env.local
+
+# ide
+.idea/
+.vscode/
+*.swp
+
+# os
+.DS_Store
+Thumbs.db
+
+
+# logs
+*.log
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
