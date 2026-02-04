@@ -1,0 +1,121 @@
+<p align="center">
+  <img src="logo.svg" alt="Tracefinity">
+</p>
+
+<p align="center">
+  <a href="https://github.com/tracefinity/tracefinity/releases"><img src="https://img.shields.io/github/v/release/tracefinity/tracefinity?style=flat-square&color=6366f1" alt="Release"></a>
+  <a href="https://github.com/tracefinity/tracefinity/actions"><img src="https://img.shields.io/github/actions/workflow/status/tracefinity/tracefinity/docker-dev.yml?style=flat-square&label=build" alt="Build"></a>
+  <a href="https://github.com/tracefinity/tracefinity/pkgs/container/tracefinity"><img src="https://img.shields.io/badge/ghcr.io-tracefinity-a855f7?style=flat-square" alt="Container"></a>
+  <a href="https://github.com/tracefinity/tracefinity/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tracefinity/tracefinity?style=flat-square&color=ec4899" alt="Licence"></a>
+</p>
+
+<p align="center">Generate custom <a href="https://gridfinity.xyz/">gridfinity</a> bins from photos of your tools.</p>
+
+## How It Works
+
+1. Place tools on A4/Letter paper (portrait or landscape)
+2. Take a photo from above
+3. Upload and adjust paper corners for scale calibration
+4. AI traces tool outlines automatically
+5. Save traced tools to your library
+6. Create bins, add tools from the library, arrange the layout
+7. Download STL/3MF for 3D printing
+
+[Demo video](docs/tracefinity-demo.mp4)
+
+![Upload and corner detection](docs/screenshots/1.png)
+![AI tracing](docs/screenshots/2.png)
+![Configure and preview](docs/screenshots/3.png)
+
+## Quick Start
+
+Try it at [tracefinity.net](https://tracefinity.net) without installing anything, or self-host:
+
+### Docker
+
+```bash
+docker run -p 3000:3000 -v ./data:/app/storage -e GOOGLE_API_KEY=your-key ghcr.io/tracefinity/tracefinity
+```
+
+Open http://localhost:3000
+
+The `GOOGLE_API_KEY` is optional - you can use the manual mask upload workflow instead.
+
+### From Source
+
+Prerequisites: Python 3.11+, Node.js 20+
+
+```bash
+git clone https://github.com/tracefinity/tracefinity
+cd tracefinity
+
+# Optional: set your Gemini API key (or use the manual mask upload workflow)
+export GOOGLE_API_KEY=your-key
+
+# Backend
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+# Frontend (new terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:3000
+
+## Features
+
+- **AI-powered tracing** - Gemini generates accurate tool silhouettes
+- **Manual mask upload** - Use Gemini web interface without an API key
+- **Tool library** - Save traced tools and reuse them across multiple bins
+- **Bin builder** - Drag and arrange tools, auto-sizing grid to fit
+- **Manual refinement** - Edit traced outlines with vertex tools
+- **Finger holes** - Add circular, square, or rectangular cutouts for easy tool removal
+- **Text labels** - Recessed or embossed text on bins
+- **Gridfinity compatible** - Proper base profile, magnet holes, stacking lip
+- **Live 3D preview** - See your bin before printing
+- **3MF export** - Multi-colour printing support for embossed text
+- **Bed splitting** - Large bins auto-split into printable pieces with diagonal fit detection
+
+## How the AI Tracing Works
+
+Tracefinity uses Google's [Gemini API](https://ai.google.dev/) with the `gemini-3-pro-image-preview` model, which can generate images from prompts.
+
+1. Your photo is sent to Gemini with a prompt asking for a black and white silhouette mask
+2. Gemini returns a mask image with tools in black, background in white
+3. OpenCV traces the contours from the mask to create editable polygons
+4. A second Gemini call identifies what each tool is (for labelling)
+
+The UI shows you exactly what prompts are sent before you click "Trace".
+
+### Why Gemini?
+
+Several approaches were tested before settling on Gemini's image generation:
+
+- **OpenCV** - Traditional computer vision (edge detection, thresholding, watershed) struggles with varied lighting, shadows, and tools that blend into backgrounds
+- **OpenAI/Anthropic** - Vision models can describe images but can't generate the mask images needed for contour extraction
+- **Gemini** - The `gemini-3-pro-image-preview` model can both understand the image and generate a clean silhouette mask, handling shadows and complex shapes reliably
+
+To get an API key: [Google AI Studio](https://aistudio.google.com/apikey) (free tier available).
+
+## Manual Mask Upload
+
+No API key? No problem:
+
+1. Upload your photo and set paper corners
+2. Click "Manual" and download the corrected image
+3. Open [Gemini](https://gemini.google.com) and paste the image with the provided prompt
+4. Download the generated mask (black tools on white background)
+5. Upload the mask back to Tracefinity
+
+## What is Gridfinity?
+
+[Gridfinity](https://gridfinity.xyz/) is a modular storage system designed by [Zack Freedman](https://www.youtube.com/watch?v=ra_9zU-mnl8). Bins snap into baseplates on a 42mm grid, making it easy to organise tools, components, and supplies. The system is open source and hugely popular in the 3D printing community.
+
+## Licence
+
+MIT

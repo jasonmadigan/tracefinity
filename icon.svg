@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#111827"/>
+
+  <!-- grid lines -->
+  <g stroke="#1e293b" stroke-width="6">
+    <line x1="128" y1="64" x2="128" y2="448"/>
+    <line x1="256" y1="64" x2="256" y2="448"/>
+    <line x1="384" y1="64" x2="384" y2="448"/>
+    <line x1="64" y1="128" x2="448" y2="128"/>
+    <line x1="64" y1="256" x2="448" y2="256"/>
+    <line x1="64" y1="384" x2="448" y2="384"/>
+  </g>
+
+  <!-- tool outline trace - bold, solid stroke -->
+  <path
+    d="M 190 150 L 190 270 Q 190 330 235 355 L 256 370 L 277 355 Q 322 330 322 270 L 322 150 Q 322 115 290 115 L 222 115 Q 190 115 190 150 Z"
+    fill="none"
+    stroke="#4a9eff"
+    stroke-width="18"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- crosshair -->
+  <g stroke="#4a9eff" stroke-width="8" stroke-linecap="round" opacity="0.5">
+    <line x1="256" y1="390" x2="256" y2="430"/>
+    <line x1="236" y1="410" x2="276" y2="410"/>
+  </g>
+</svg>

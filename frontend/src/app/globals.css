@@ -1,0 +1,151 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0a0f1a;
+  color: #f1f5f9;
+}
+
+/* focus states for accessibility */
+@layer base {
+  button:focus-visible,
+  [role="button"]:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-base;
+  }
+}
+
+/* 3d button treatment matching gridfinity generator */
+@layer components {
+  .btn-primary {
+    @apply relative overflow-hidden bg-accent text-white font-medium rounded-[10px] transition-colors hover:bg-accent-hover disabled:opacity-50;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 0 1px rgba(0, 0, 0, 0.1),
+      0 2px 2px rgba(0, 0, 0, 0.07),
+      0 4px 3px rgba(0, 0, 0, 0.04);
+  }
+
+  .btn-secondary {
+    @apply relative overflow-hidden bg-elevated text-text-secondary font-medium rounded-[10px] transition-colors hover:bg-border-subtle;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 0 1px rgba(0, 0, 0, 0.1),
+      0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+}
+
+/* custom range slider */
+@layer components {
+  input[type="range"] {
+    @apply appearance-none bg-transparent cursor-pointer;
+    height: 28px;
+  }
+
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 28px;
+    border-radius: 5px;
+    background: linear-gradient(
+      to right,
+      rgba(75, 178, 247, 0.8) 0%,
+      rgba(75, 178, 247, 0.8) var(--slider-pct, 0%),
+      #222a35 var(--slider-pct, 0%),
+      #222a35 100%
+    );
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 10px;
+    height: 28px;
+    border-radius: 4px;
+    background: #ebecec;
+    border: 1px solid #2475c6;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  input[type="range"]::-webkit-slider-thumb:hover {
+    background: #f1f3f5;
+  }
+
+  input[type="range"]::-moz-range-track {
+    height: 28px;
+    border-radius: 5px;
+    background: linear-gradient(
+      to right,
+      rgba(75, 178, 247, 0.8) 0%,
+      rgba(75, 178, 247, 0.8) var(--slider-pct, 0%),
+      #222a35 var(--slider-pct, 0%),
+      #222a35 100%
+    );
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 10px;
+    height: 28px;
+    border-radius: 4px;
+    background: #ebecec;
+    border: 1px solid #2475c6;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  input[type="range"]::-moz-range-thumb:hover {
+    background: #f1f3f5;
+  }
+
+  input[type="range"]:focus-visible::-webkit-slider-thumb {
+    @apply ring-2 ring-blue-500 ring-offset-2;
+  }
+}
+
+/* thin themed scrollbar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* hide number input spinners */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* progress bar slide animation */
+@keyframes slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* larger touch targets on touch devices */
+@media (pointer: coarse) {
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
