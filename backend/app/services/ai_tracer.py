@@ -57,7 +57,10 @@ class AITracer:
         if not contours:
             return [], mask_output_path
 
-        labels = await self._get_labels(image_path, contours, api_key)
+        try:
+            labels = await self._get_labels(image_path, contours, api_key)
+        except Exception:
+            labels = [f"tool {i + 1}" for i in range(len(contours))]
 
         polygons = []
         for i, contour in enumerate(contours):
