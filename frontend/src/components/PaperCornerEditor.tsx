@@ -10,6 +10,7 @@ interface Props {
 }
 
 const HANDLE_RADIUS = 12
+const HANDLE_HIT_RADIUS = 24
 
 export function PaperCornerEditor({ imageUrl, corners, onCornersChange }: Props) {
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -82,11 +83,28 @@ export function PaperCornerEditor({ imageUrl, corners, onCornersChange }: Props)
     setDragging(index)
   }
 
+  const handleTouchStart = (index: number) => (e: React.TouchEvent) => {
+    e.preventDefault()
+    setDragging(index)
+  }
+
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
       if (dragging === null) return
-
       const point = getScaledPoint(e.clientX, e.clientY)
+      const updated = [...corners]
+      updated[dragging] = point
+      onCornersChange(updated)
+    },
+    [dragging, corners, getScaledPoint, onCornersChange]
+  )
+
+  const handleTouchMove = useCallback(
+    (e: TouchEvent) => {
+      if (dragging === null) return
+      e.preventDefault()
+      const t = e.touches[0]
+      const point = getScaledPoint(t.clientX, t.clientY)
       const updated = [...corners]
       updated[dragging] = point
       onCornersChange(updated)
@@ -98,16 +116,24 @@ export function PaperCornerEditor({ imageUrl, corners, onCornersChange }: Props)
     setDragging(null)
   }, [])
 
+  const handleTouchEnd = useCallback(() => {
+    setDragging(null)
+  }, [])
+
   useEffect(() => {
     if (dragging !== null) {
       window.addEventListener('mousemove', handleMouseMove)
       window.addEventListener('mouseup', handleMouseUp)
+      window.addEventListener('touchmove', handleTouchMove, { passive: false })
+      window.addEventListener('touchend', handleTouchEnd)
       return () => {
         window.removeEventListener('mousemove', handleMouseMove)
         window.removeEventListener('mouseup', handleMouseUp)
+        window.removeEventListener('touchmove', handleTouchMove)
+        window.removeEventListener('touchend', handleTouchEnd)
       }
     }
-  }, [dragging, handleMouseMove, handleMouseUp])
+  }, [dragging, handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd])
 
   if (!imageSize.width || !fitted.width) {
     return (
@@ -144,17 +170,26 @@ export function PaperCornerEditor({ imageUrl, corners, onCornersChange }: Props)
           )}
 
           {corners.map((corner, index) => (
-            <circle
-              key={index}
-              cx={corner.x * displayScale}
-              cy={corner.y * displayScale}
-              r={HANDLE_RADIUS}
-              fill="#1e293b"
-              stroke="rgb(59, 130, 246)"
-              strokeWidth={2}
-              className="pointer-events-auto cursor-move"
-              onMouseDown={handleMouseDown(index)}
-            />
+            <g key={index}>
+              <circle
+                cx={corner.x * displayScale}
+                cy={corner.y * displayScale}
+                r={HANDLE_HIT_RADIUS}
+                fill="transparent"
+                className="pointer-events-auto cursor-move touch-none"
+                onMouseDown={handleMouseDown(index)}
+                onTouchStart={handleTouchStart(index)}
+              />
+              <circle
+                cx={corner.x * displayScale}
+                cy={corner.y * displayScale}
+                r={HANDLE_RADIUS}
+                fill="#1e293b"
+                stroke="rgb(59, 130, 246)"
+                strokeWidth={2}
+                className="pointer-events-none"
+              />
+            </g>
           ))}
         </svg>
       </div>

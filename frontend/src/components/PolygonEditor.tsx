@@ -206,6 +206,14 @@ export function PolygonEditor({
     }
   }
 
+  const handleVertexTouchStart = (polyId: string, pointIdx: number) => (e: React.TouchEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (editable && (editMode === 'vertex' || editMode === 'select')) {
+      setDragging({ type: 'vertex', polyId, pointIdx })
+    }
+  }
+
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
       if (!dragging) return
@@ -225,7 +233,34 @@ export function PolygonEditor({
     [dragging, getScaledPoint]
   )
 
+  const handleTouchMove = useCallback(
+    (e: TouchEvent) => {
+      if (!dragging) return
+      e.preventDefault()
+      const t = e.touches[0]
+      const point = getScaledPoint(t.clientX, t.clientY)
+
+      if (dragging.type === 'vertex') {
+        const updated = polygonsRef.current.map((poly) => {
+          if (poly.id !== dragging.polyId) return poly
+          const points = [...poly.points]
+          points[dragging.pointIdx] = point
+          return { ...poly, points }
+        })
+        onPolygonsChangeRef.current(updated)
+      }
+    },
+    [dragging, getScaledPoint]
+  )
+
   const handleMouseUp = useCallback(() => {
+    if (dragging) {
+      pushHistory(polygonsRef.current)
+    }
+    setDragging(null)
+  }, [dragging, pushHistory])
+
+  const handleTouchEnd = useCallback(() => {
     if (dragging) {
       pushHistory(polygonsRef.current)
     }
@@ -236,12 +271,16 @@ export function PolygonEditor({
     if (dragging) {
       window.addEventListener('mousemove', handleMouseMove)
       window.addEventListener('mouseup', handleMouseUp)
+      window.addEventListener('touchmove', handleTouchMove, { passive: false })
+      window.addEventListener('touchend', handleTouchEnd)
       return () => {
         window.removeEventListener('mousemove', handleMouseMove)
         window.removeEventListener('mouseup', handleMouseUp)
+        window.removeEventListener('touchmove', handleTouchMove)
+        window.removeEventListener('touchend', handleTouchEnd)
       }
     }
-  }, [dragging, handleMouseMove, handleMouseUp])
+  }, [dragging, handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd])
 
   const handleBackgroundClick = () => {
     setSelected(null)
@@ -419,18 +458,28 @@ export function PolygonEditor({
                   editable &&
                   (editMode === 'vertex' || editMode === 'select' || editMode === 'add-vertex' || editMode === 'delete-vertex') &&
                   poly.points.map((point, idx) => (
-                    <circle
-                      key={idx}
-                      cx={point.x}
-                      cy={point.y}
-                      r={uiScale * 8}
-                      fill={editMode === 'delete-vertex' ? 'rgb(239, 68, 68)' : '#1e293b'}
-                      stroke={editMode === 'delete-vertex' ? 'rgb(185, 28, 28)' : 'rgb(37, 99, 235)'}
-                      strokeWidth={uiScale * 2}
-                      className={editMode === 'delete-vertex' ? 'cursor-pointer' : 'cursor-move'}
-                      onMouseDown={editMode !== 'delete-vertex' ? handleVertexMouseDown(poly.id, idx) : undefined}
-                      onClick={handleVertexClick(poly.id, idx)}
-                    />
+                    <g key={idx}>
+                      {/* transparent hit target -- larger for touch */}
+                      <circle
+                        cx={point.x}
+                        cy={point.y}
+                        r={uiScale * 16}
+                        fill="transparent"
+                        className={editMode === 'delete-vertex' ? 'cursor-pointer touch-none' : 'cursor-move touch-none'}
+                        onMouseDown={editMode !== 'delete-vertex' ? handleVertexMouseDown(poly.id, idx) : undefined}
+                        onTouchStart={editMode !== 'delete-vertex' ? handleVertexTouchStart(poly.id, idx) : undefined}
+                        onClick={handleVertexClick(poly.id, idx)}
+                      />
+                      <circle
+                        cx={point.x}
+                        cy={point.y}
+                        r={uiScale * 8}
+                        fill={editMode === 'delete-vertex' ? 'rgb(239, 68, 68)' : '#1e293b'}
+                        stroke={editMode === 'delete-vertex' ? 'rgb(185, 28, 28)' : 'rgb(37, 99, 235)'}
+                        strokeWidth={uiScale * 2}
+                        className="pointer-events-none"
+                      />
+                    </g>
                   ))}
 
               </g>

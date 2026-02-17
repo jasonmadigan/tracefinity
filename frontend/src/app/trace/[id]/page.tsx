@@ -81,7 +81,8 @@ export default function TracePage() {
           setCorrectedImageUrl(`/storage/${s.corrected_image_path}`)
         }
         if (s.mask_image_path) {
-          setMaskUrl(`/storage/${s.mask_image_path}`)
+          const maskRel = s.mask_image_path.replace(/^storage\//, '')
+          setMaskUrl(`/storage/${maskRel}`)
         }
         if (s.polygons && s.polygons.length > 0) {
           setPolygons(s.polygons)
@@ -272,18 +273,20 @@ export default function TracePage() {
   }
 
   return (
-    <div className="h-[calc(100vh-53px)] flex w-full">
+    <div className="h-[calc(100vh-53px)] flex flex-col md:flex-row w-full">
       {/* left sidebar - controls */}
-      <div className="w-[260px] flex-shrink-0 bg-surface border-r border-border overflow-y-auto flex flex-col">
-        {session && (
-          <SessionInfo
-            session={session}
-            onUpdate={(updates) => {
-              updateSession(sessionId, updates)
-              setSession({ ...session, ...updates })
-            }}
-          />
-        )}
+      <div className="md:w-[260px] md:flex-shrink-0 bg-surface border-b md:border-b-0 md:border-r border-border overflow-y-auto flex flex-col max-h-[40vh] md:max-h-none">
+        <div className="hidden md:block">
+          {session && (
+            <SessionInfo
+              session={session}
+              onUpdate={(updates) => {
+                updateSession(sessionId, updates)
+                setSession({ ...session, ...updates })
+              }}
+            />
+          )}
+        </div>
 
         <div className="px-4 py-3 border-b border-border">
           <h3 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
@@ -496,7 +499,7 @@ export default function TracePage() {
           </div>
         )}
 
-        <div className="px-4 py-3 mt-auto space-y-2">
+        <div className="px-4 py-3 md:mt-auto space-y-2">
           {step === 'corners' && (
             <button
               onClick={handleCornersSubmit}
@@ -561,7 +564,7 @@ export default function TracePage() {
       </div>
 
       {/* image area */}
-      <div className="flex-1 bg-inset overflow-hidden p-4">
+      <div className="flex-1 min-h-0 bg-inset overflow-hidden p-4">
         {step === 'corners' && (
           <PaperCornerEditor
             imageUrl={imageUrl}

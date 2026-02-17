@@ -245,9 +245,9 @@ export default function BinPage() {
   const splitUrlsWithVersion = stlUrls.length > 0 ? stlUrls.map(u => `${u}?v=${stlVersion}`) : null
 
   return (
-    <div className="h-[calc(100vh-53px)] flex w-full">
+    <div className="h-[calc(100vh-53px)] flex flex-col md:flex-row w-full">
       {/* left sidebar */}
-      <div className="w-[260px] flex-shrink-0 bg-surface border-r border-border flex flex-col">
+      <div className="md:w-[260px] md:flex-shrink-0 bg-surface border-b md:border-b-0 md:border-r border-border flex flex-col max-h-[45vh] md:max-h-none">
         <div className="px-4 py-3 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2 mb-2">
             <button
@@ -359,7 +359,7 @@ export default function BinPage() {
       </div>
 
       {/* bin editor */}
-      <div className="flex-1 bg-inset overflow-hidden p-4">
+      <div className="flex-1 min-h-0 bg-inset overflow-hidden p-4">
         <BinEditor
           placedTools={placedTools}
           onPlacedToolsChange={handlePlacedToolsChange}
@@ -372,8 +372,8 @@ export default function BinPage() {
         />
       </div>
 
-      {/* 3D preview */}
-      <div className="flex-1 bg-inset border-l border-border overflow-hidden flex flex-col relative">
+      {/* 3D preview - hidden on mobile */}
+      <div className="hidden md:flex flex-1 bg-inset border-l border-border overflow-hidden flex-col relative">
         {generating && (
           <div className="absolute inset-x-0 bottom-0 z-10">
             <div className="h-1 w-full overflow-hidden bg-blue-950">
