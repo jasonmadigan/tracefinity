@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, UploadFile, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from starlette.requests import Request
 from PIL import Image
 import io
@@ -567,6 +567,38 @@ async def delete_tool(request: Request, tool_id: str, user_id: str = Depends(get
     if not tool:
         raise HTTPException(status_code=404, detail="tool not found")
     return StatusResponse(status="deleted")
+
+
+@router.get("/files/tools/{tool_id}/tool.svg")
+async def download_tool_svg(request: Request, tool_id: str, user_id: str = Depends(get_user_id)):
+    _, user_tools, _ = get_stores(user_id)
+    tool = user_tools.get(tool_id)
+    if not tool or not tool.points:
+        raise HTTPException(status_code=404, detail="tool not found")
+
+    xs = [p.x for p in tool.points]
+    ys = [p.y for p in tool.points]
+    pad = 1.0
+    min_x, max_x = min(xs) - pad, max(xs) + pad
+    min_y, max_y = min(ys) - pad, max(ys) + pad
+    w = max_x - min_x
+    h = max_y - min_y
+
+    pts = " ".join(f"{p.x},{p.y}" for p in tool.points)
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg"'
+        f' width="{w:.4f}mm" height="{h:.4f}mm"'
+        f' viewBox="{min_x:.4f} {min_y:.4f} {w:.4f} {h:.4f}">\n'
+        f'  <polygon points="{pts}" fill="black" stroke="none"/>\n'
+        f'</svg>\n'
+    )
+
+    safe_name = tool.name.replace('"', '').replace('/', '-') if tool.name else "tool"
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.svg"'},
+    )
 
 
 @router.post("/sessions/{session_id}/save-tools", response_model=SaveToolsResponse)

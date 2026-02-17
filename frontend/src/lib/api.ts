@@ -205,6 +205,10 @@ export async function deleteTool(toolId: string): Promise<void> {
   await fetchApi(`/api/tools/${toolId}`, { method: 'DELETE' })
 }
 
+export function getToolSvgUrl(toolId: string): string {
+  return `${API_URL}/api/files/tools/${toolId}/tool.svg`
+}
+
 export async function saveToolsFromSession(sessionId: string): Promise<string[]> {
   const res = await fetchApi<{ tool_ids: string[] }>(`/api/sessions/${sessionId}/save-tools`, {
     method: 'POST',
