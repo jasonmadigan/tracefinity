@@ -291,7 +291,7 @@ export default function HomePage() {
                         {formatDate(tool.created_at)}
                       </p>
                     </div>
-                    <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-0.5 flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={(e) => { e.stopPropagation(); setNameModal({ toolIds: [tool.id] }) }}
                         disabled={creatingBin === tool.id}
@@ -361,7 +361,7 @@ export default function HomePage() {
                           )}
                         </p>
                       </div>
-                      <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-0.5 flex-shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={(e) => { e.stopPropagation(); setDeleteModal({ type: 'bin', id: bin.id }) }}
                           className="p-1 text-text-muted hover:text-red-400 hover:bg-red-900/20 rounded"

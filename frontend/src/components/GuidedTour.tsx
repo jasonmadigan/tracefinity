@@ -20,7 +20,7 @@ export function GuidedTour({ open, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-surface border border-border rounded-lg shadow-2xl max-w-lg w-full mx-4 p-5">
+      <div className="relative bg-surface border border-border rounded-lg shadow-2xl max-w-lg w-full mx-4 p-5 max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-medium text-text-primary">How it works</h2>
           <button
