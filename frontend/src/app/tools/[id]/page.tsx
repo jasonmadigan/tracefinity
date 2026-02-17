@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import { Loader2, ArrowLeft, Check } from 'lucide-react'
-import { getTool, updateTool } from '@/lib/api'
+import { Loader2, ArrowLeft, Check, Download } from 'lucide-react'
+import { getTool, updateTool, getToolSvgUrl } from '@/lib/api'
 import { ToolEditor } from '@/components/ToolEditor'
 import { Alert } from '@/components/Alert'
 import type { Tool, Point, FingerHole } from '@/types'
@@ -122,6 +122,14 @@ export default function ToolPage() {
           className="text-sm font-medium text-text-primary bg-transparent border-none outline-none flex-1 min-w-0"
           placeholder="Tool name"
         />
+        <a
+          href={getToolSvgUrl(toolId)}
+          download
+          className="btn-primary py-1.5 px-3 inline-flex items-center gap-1.5 text-sm"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Export SVG
+        </a>
         <div className="flex items-center gap-1.5 text-xs text-text-muted">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           {saved && <Check className="w-3.5 h-3.5 text-green-400" />}
