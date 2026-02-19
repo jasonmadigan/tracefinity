@@ -6,8 +6,9 @@ numpy>=2.0.0
 google-genai>=1.0.0
 httpx>=0.27.0
 shapely>=2.0.7
-build123d>=0.8.0
-gridfinity @ git+https://github.com/moritzmhmk/gridfinity-build123d.git
+manifold3d>=3.0.0
+trimesh>=4.0.0
+lxml>=4.0.0
 pydantic>=2.6.0
 pydantic-settings>=2.1.0
 aiofiles>=23.2.0

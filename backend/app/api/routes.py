@@ -46,7 +46,7 @@ from app.models.schemas import (
 from app.services.image_processor import ImageProcessor
 from app.services.ai_tracer import AITracer
 from app.services.polygon_scaler import PolygonScaler, ScaledPolygon, ScaledFingerHole
-from app.services.stl_generator import STLGenerator
+from app.services.stl_generator_manifold import ManifoldSTLGenerator
 from app.services.session_store import SessionStore
 from app.services.tool_store import ToolStore
 from app.services.bin_store import BinStore
@@ -96,7 +96,7 @@ def _convert_heic_to_jpeg(content: bytes, original_ext: str) -> tuple[bytes, str
 image_processor = ImageProcessor()
 ai_tracer = AITracer()
 polygon_scaler = PolygonScaler()
-stl_generator = STLGenerator()
+stl_generator = ManifoldSTLGenerator()
 
 
 def _rel(abs_path: str | Path, user_path: Path) -> str:

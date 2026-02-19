@@ -41,7 +41,7 @@ function StlModel({ url, renderMode }: { url: string; renderMode: RenderMode }) 
 
         geo.translate(-centerX, -centerY, -minZ)
         loadedGeo = geo
-        loadedEdges = new THREE.EdgesGeometry(geo, 20)
+        loadedEdges = new THREE.EdgesGeometry(geo, 30)
         setGeometry(geo)
         setEdgesGeometry(loadedEdges)
       },
@@ -117,7 +117,7 @@ function SplitModels({ urls, renderMode }: { urls: string[]; renderMode: RenderM
         const minZ = box.min.z
         geo.translate(-((box.max.x + box.min.x) / 2) + xOffset + w / 2, -centerY, -minZ)
         xOffset += w + GAP
-        const edges = new THREE.EdgesGeometry(geo, 20)
+        const edges = new THREE.EdgesGeometry(geo, 30)
         return { geo, edges, offset: 0 }
       })
 
