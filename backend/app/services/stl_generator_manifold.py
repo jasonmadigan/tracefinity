@@ -420,7 +420,7 @@ def _make_text_labels(
             if tl.emboss:
                 solid = (
                     mf.Manifold.extrude(cs, tl.depth)
-                    .rotate((0.0, 0.0, tl.rotation))
+                    .rotate((0.0, 0.0, -tl.rotation))
                     .translate((lx, ly, wall_top_z))
                 )
                 embossed.append(solid)
@@ -428,7 +428,7 @@ def _make_text_labels(
                 # recessed: extrude then place at wall_top going down
                 cutter = (
                     mf.Manifold.extrude(cs, tl.depth + 0.01)
-                    .rotate((0.0, 0.0, tl.rotation))
+                    .rotate((0.0, 0.0, -tl.rotation))
                     .translate((lx, ly, wall_top_z - tl.depth - 0.01))
                 )
                 recessed.append(cutter)

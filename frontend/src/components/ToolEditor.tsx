@@ -628,7 +628,7 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
                 />
                 <circle
                   cx={midX} cy={midY} r={5}
-                  fill="rgb(34, 197, 94)" stroke="#1e293b" strokeWidth={2}
+                  fill="rgb(34, 197, 94)" stroke="#27272a" strokeWidth={2}
                   className="pointer-events-none"
                 />
               </g>
@@ -642,7 +642,7 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
               cx={p.x * DISPLAY_SCALE}
               cy={p.y * DISPLAY_SCALE}
               r={8}
-              fill={editMode === 'delete-vertex' ? 'rgb(239, 68, 68)' : selection?.type === 'vertex' && selection.pointIdx === idx ? 'rgb(37, 99, 235)' : '#1e293b'}
+              fill={editMode === 'delete-vertex' ? 'rgb(239, 68, 68)' : selection?.type === 'vertex' && selection.pointIdx === idx ? 'rgb(37, 99, 235)' : '#27272a'}
               stroke={editMode === 'delete-vertex' ? 'rgb(185, 28, 28)' : 'rgb(37, 99, 235)'}
               strokeWidth={2}
               className={editMode === 'delete-vertex' ? 'cursor-pointer' : 'cursor-move'}

@@ -32,7 +32,7 @@ export default function RootLayout({
         <QueryClientProvider client={queryClient}>
           <header className="bg-surface border-b border-border">
             <div className="px-4 py-2.5 flex items-center justify-between">
-              <Link href="/" className="flex items-center gap-2.5 text-base font-bold tracking-tight hover:opacity-80" style={{ color: '#f1f5f9' }}>
+              <Link href="/" className="flex items-center gap-2.5 text-base font-bold tracking-tight hover:opacity-80 text-text-primary">
                 <img src="/favicon.svg" alt="" className="w-7 h-7 rounded-[4px]" />
                 Tracefinity
               </Link>

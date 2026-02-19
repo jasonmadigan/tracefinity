@@ -66,12 +66,11 @@ export function BinEditor({
   const displayWidth = binWidthMm * DISPLAY_SCALE
   const displayHeight = binHeightMm * DISPLAY_SCALE
 
-  // ui handle sizes scale with viewBox so they stay readable on large bins
+  // handle sizes: scale gently with bin size but stay bounded
   const viewBoxShort = Math.min(displayWidth, displayHeight) + 30
-  const handleR = Math.max(16, viewBoxShort * 0.04)
-  const handleFont = handleR * 1.1
+  const handleR = Math.max(14, Math.min(28, viewBoxShort * 0.04))
   const handleOffset = handleR * 2.5
-  const handleStroke = Math.max(2, handleR * 0.15)
+  const handleStroke = Math.max(1.5, handleR * 0.1)
 
   const getAllBounds = useCallback(() => {
     if (placedTools.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 }
@@ -365,14 +364,14 @@ export function BinEditor({
         <div className="flex gap-1 bg-elevated rounded-lg p-1 border border-border">
           <button
             onClick={() => setActiveTool('select')}
-            className={`p-2 rounded ${activeTool === 'select' ? 'bg-accent-muted text-blue-400' : 'hover:bg-border text-text-secondary'}`}
+            className={`p-2 rounded ${activeTool === 'select' ? 'bg-accent-muted text-accent' : 'hover:bg-border text-text-secondary'}`}
             title="Select & Move"
           >
             <Hand className="w-5 h-5" />
           </button>
           <button
             onClick={() => setActiveTool('text')}
-            className={`p-2 rounded ${activeTool === 'text' ? 'bg-accent-muted text-blue-400' : 'hover:bg-border text-text-secondary'}`}
+            className={`p-2 rounded ${activeTool === 'text' ? 'bg-accent-muted text-accent' : 'hover:bg-border text-text-secondary'}`}
             title="Add Text Label"
           >
             <Type className="w-5 h-5" />
@@ -400,7 +399,7 @@ export function BinEditor({
             {onEditTool && selectedTool && (
               <button
                 onClick={() => onEditTool(selectedTool.tool_id)}
-                className="px-3 py-1.5 text-sm text-blue-400 hover:bg-accent-muted rounded border border-blue-800 flex items-center gap-1"
+                className="px-3 py-1.5 text-sm text-accent hover:bg-accent-muted rounded border border-accent-muted flex items-center gap-1"
               >
                 <Pencil className="w-4 h-4" />
                 Edit Tool
@@ -474,7 +473,7 @@ export function BinEditor({
           style={{ overflow: 'visible' }}
           onClick={handleBackgroundClick}
         >
-          <rect x="0" y="0" width={displayWidth} height={displayHeight} fill="rgb(30, 41, 59)" rx="4" />
+          <rect x="0" y="0" width={displayWidth} height={displayHeight} fill="rgb(25, 26, 29)" rx="4" />
           {Array.from({ length: gridX + 1 }).map((_, i) => (
             <line
               key={`v${i}`}
@@ -517,8 +516,8 @@ export function BinEditor({
               <g key={tool.id} onClick={stopClick}>
                 <path
                   d={pathData}
-                  fill={isSelected ? 'rgb(51, 65, 85)' : 'rgb(71, 85, 105)'}
-                  stroke={isSelected ? 'rgb(148, 163, 184)' : 'rgb(100, 116, 139)'}
+                  fill={isSelected ? 'rgb(52, 52, 58)' : 'rgb(63, 63, 70)'}
+                  stroke={isSelected ? 'rgb(161, 161, 170)' : 'rgb(113, 113, 122)'}
                   strokeWidth={handleStroke}
                   className="cursor-move"
                   onMouseDown={handleToolMouseDown(tool.id)}
@@ -540,14 +539,14 @@ export function BinEditor({
                       {shape === 'circle' && (
                         <circle
                           cx={x} cy={y} r={r}
-                          fill="rgb(51, 65, 85)" stroke="rgb(30, 41, 59)" strokeWidth={1}
+                          fill="rgb(52, 52, 58)" stroke="rgb(25, 26, 29)" strokeWidth={1}
                           className="pointer-events-none"
                         />
                       )}
                       {(shape === 'square' || shape === 'rectangle') && (
                         <rect
                           x={x - w / 2} y={y - h / 2} width={w} height={h}
-                          fill="rgb(51, 65, 85)" stroke="rgb(30, 41, 59)" strokeWidth={1}
+                          fill="rgb(52, 52, 58)" stroke="rgb(25, 26, 29)" strokeWidth={1}
                           className="pointer-events-none"
                         />
                       )}
@@ -595,18 +594,18 @@ export function BinEditor({
               <g>
                 <line
                   x1={centerX} y1={centerY} x2={maxX + handleOffset * 0.6} y2={centerY}
-                  stroke="rgb(59, 130, 246)" strokeWidth={handleStroke} strokeDasharray={`${handleR * 0.3},${handleR * 0.2}`}
+                  stroke="rgb(31, 111, 189)" strokeWidth={handleStroke} strokeDasharray={`${handleR * 0.3},${handleR * 0.2}`}
                 />
                 <circle
                   cx={maxX + handleOffset} cy={centerY} r={handleR}
-                  fill="rgb(59, 130, 246)" stroke="white" strokeWidth={handleStroke}
+                  fill="rgb(31, 111, 189)" stroke="white" strokeWidth={handleStroke}
                   className="cursor-grab"
                   onMouseDown={handleRotateMouseDown(tool.id)}
                   onClick={stopClick}
                 />
                 <text
-                  x={maxX + handleOffset} y={centerY + handleFont * 0.38}
-                  textAnchor="middle" fill="white" fontSize={handleFont * 1.3}
+                  x={maxX + handleOffset} y={centerY + handleR * 0.38}
+                  textAnchor="middle" fill="white" fontSize={handleR * 1.1}
                   className="pointer-events-none select-none"
                 >&#x21BB;</text>
               </g>
@@ -632,8 +631,8 @@ export function BinEditor({
                   onClick={stopClick}
                 />
                 <text
-                  x={x} y={y - fontSize - handleOffset + handleFont * 0.38}
-                  textAnchor="middle" fill="white" fontSize={handleFont * 1.3}
+                  x={x} y={y - fontSize - handleOffset + handleR * 0.38}
+                  textAnchor="middle" fill="white" fontSize={handleR * 1.1}
                   className="pointer-events-none select-none"
                 >&#x21BB;</text>
               </g>

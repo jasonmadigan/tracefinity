@@ -64,13 +64,20 @@ function StlModel({ url, renderMode }: { url: string; renderMode: RenderMode }) 
   return (
     <group rotation={[-Math.PI / 2, 0, 0]}>
       {renderMode === 'solid' ? (
-        <mesh geometry={geometry}>
-          <meshStandardMaterial color="#4a9eff" metalness={0.3} roughness={0.4} />
-        </mesh>
+        <>
+          <mesh geometry={geometry}>
+            <meshStandardMaterial color="#5ab4de" metalness={0} roughness={0.7} />
+          </mesh>
+          {edgesGeometry && (
+            <lineSegments geometry={edgesGeometry}>
+              <lineBasicMaterial color="#1e3d5c" linewidth={1} />
+            </lineSegments>
+          )}
+        </>
       ) : (
         <>
           <mesh geometry={geometry}>
-            <meshStandardMaterial color="#1e293b" metalness={0} roughness={1} transparent opacity={0.3} />
+            <meshStandardMaterial color="#27272a" metalness={0} roughness={1} transparent opacity={0.3} />
           </mesh>
           {edgesGeometry && (
             <lineSegments geometry={edgesGeometry}>
@@ -138,13 +145,18 @@ function SplitModels({ urls, renderMode }: { urls: string[]; renderMode: RenderM
       {pieces.map((piece, i) => (
         <group key={i}>
           {renderMode === 'solid' ? (
-            <mesh geometry={piece.geo}>
-              <meshStandardMaterial color={SPLIT_PIECE_COLORS[i % SPLIT_PIECE_COLORS.length]} metalness={0.3} roughness={0.4} />
-            </mesh>
+            <>
+              <mesh geometry={piece.geo}>
+                <meshStandardMaterial color={SPLIT_PIECE_COLORS[i % SPLIT_PIECE_COLORS.length]} metalness={0} roughness={0.7} />
+              </mesh>
+              <lineSegments geometry={piece.edges}>
+                <lineBasicMaterial color="#1e3d5c" linewidth={1} />
+              </lineSegments>
+            </>
           ) : (
             <>
               <mesh geometry={piece.geo}>
-                <meshStandardMaterial color="#1e293b" metalness={0} roughness={1} transparent opacity={0.3} />
+                <meshStandardMaterial color="#27272a" metalness={0} roughness={1} transparent opacity={0.3} />
               </mesh>
               <lineSegments geometry={piece.edges}>
                 <lineBasicMaterial color={SPLIT_PIECE_COLORS[i % SPLIT_PIECE_COLORS.length]} linewidth={1} />
@@ -206,7 +218,7 @@ function CameraController() {
 function GridFloor() {
   return (
     <gridHelper
-      args={[300, 30, '#334155', '#1e293b']}
+      args={[300, 30, '#3f3f46', '#27272a']}
       rotation={[0, 0, 0]}
       position={[0, 0, 0]}
     />
@@ -217,7 +229,7 @@ function LoadingFallback() {
   return (
     <mesh>
       <boxGeometry args={[20, 20, 20]} />
-      <meshStandardMaterial color="#334155" wireframe />
+      <meshStandardMaterial color="#3f3f46" wireframe />
     </mesh>
   )
 }
@@ -240,11 +252,10 @@ export function BinPreview3D({ stlUrl, splitUrls }: Props) {
     <div className="w-full h-full min-h-[400px] relative">
       <Canvas
         camera={{ position: [0, 250, 250], fov: 50 }}
-        style={{ background: '#0f172a' }}
+        style={{ background: '#0d0d0f' }}
       >
-        <ambientLight intensity={0.2} />
-        <directionalLight position={[10, 20, 10]} intensity={0.4} />
-        <directionalLight position={[-10, -10, -10]} intensity={0.15} />
+        <hemisphereLight args={['#e8f8ff', '#8899aa', 1.4]} />
+        <directionalLight position={[5, 10, 5]} intensity={0.7} />
 
         <Suspense fallback={<LoadingFallback />}>
           <Bounds fit clip observe margin={1.15}>

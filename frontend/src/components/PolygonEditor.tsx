@@ -445,7 +445,7 @@ export function PolygonEditor({
                           cy={midY}
                           r={uiScale * 5}
                           fill="rgb(34, 197, 94)"
-                          stroke="#1e293b"
+                          stroke="#27272a"
                           strokeWidth={uiScale * 2}
                           className="cursor-crosshair pointer-events-none"
                         />
@@ -474,7 +474,7 @@ export function PolygonEditor({
                         cx={point.x}
                         cy={point.y}
                         r={uiScale * 8}
-                        fill={editMode === 'delete-vertex' ? 'rgb(239, 68, 68)' : '#1e293b'}
+                        fill={editMode === 'delete-vertex' ? 'rgb(239, 68, 68)' : '#27272a'}
                         stroke={editMode === 'delete-vertex' ? 'rgb(185, 28, 28)' : 'rgb(37, 99, 235)'}
                         strokeWidth={uiScale * 2}
                         className="pointer-events-none"

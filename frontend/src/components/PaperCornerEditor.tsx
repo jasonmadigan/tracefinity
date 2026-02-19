@@ -184,7 +184,7 @@ export function PaperCornerEditor({ imageUrl, corners, onCornersChange }: Props)
                 cx={corner.x * displayScale}
                 cy={corner.y * displayScale}
                 r={HANDLE_RADIUS}
-                fill="#1e293b"
+                fill="#27272a"
                 stroke="rgb(59, 130, 246)"
                 strokeWidth={2}
                 className="pointer-events-none"
