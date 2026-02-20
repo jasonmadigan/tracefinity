@@ -667,12 +667,13 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
           <div className="h-4 w-px bg-border-subtle mx-1" />
           <button
             onClick={() => setSnapEnabled(!snapEnabled)}
-            className={`p-1.5 rounded transition-colors ${
+            className={`px-2 py-1.5 rounded text-xs flex items-center gap-1 transition-colors ${
               snapEnabled ? 'text-accent' : 'hover:bg-border/50 hover:text-text-secondary'
             }`}
             title={`Snap to ${SNAP_GRID}mm grid${snapEnabled ? ' (on)' : ' (off)'}`}
           >
-            <Magnet className="w-4 h-4" />
+            <Magnet className="w-3.5 h-3.5" />
+            Snap
           </button>
         </div>
 
@@ -827,19 +828,19 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
                 {corners.map((c, i) => {
                   const dx = i === 0 || i === 3 ? 1 : -1
                   const dy = i < 2 ? 1 : -1
-                  const len = 12 * s
+                  const r = 14 * s
                   return (
                     <g key={i}>
                       <path
-                        d={`M${c.x + dx * len},${c.y} L${c.x},${c.y} L${c.x},${c.y + dy * len}`}
-                        fill="none" stroke="rgba(90, 180, 222, 0.6)" strokeWidth={2 * s}
+                        d={`M${c.x},${c.y + dy * r} A${r},${r} 0 0 ${dy * dx > 0 ? 1 : 0} ${c.x + dx * r},${c.y}`}
+                        fill="none" stroke="rgba(90, 180, 222, 0.5)" strokeWidth={2 * s}
                         className="pointer-events-none"
                       />
                       <rect
                         x={c.x - cornerSize / 2} y={c.y - cornerSize / 2}
                         width={cornerSize} height={cornerSize}
                         fill="transparent"
-                        className="cursor-grab"
+                        className="cursor-rotate"
                         onMouseDown={handleRotatePolygonMouseDown}
                         onClick={stopClick}
                       />
@@ -924,7 +925,7 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
                   cx={x} cy={y - topEdge - 20 * s - hr}
                   r={hr}
                   fill="rgb(90, 180, 222)" stroke="white" strokeWidth={2 * s}
-                  className="cursor-grab"
+                  className="cursor-rotate"
                   onMouseDown={handleHoleRotateMouseDown(fh.id)}
                   onClick={stopClick}
                 />
