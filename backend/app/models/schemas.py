@@ -36,6 +36,7 @@ class Polygon(BaseModel):
     points: list[Point]
     label: str
     finger_holes: list[FingerHole] = []
+    interior_rings: list[list[Point]] = []
 
 
 class UploadResponse(BaseModel):
@@ -181,6 +182,7 @@ class Tool(BaseModel):
     name: str
     points: list[Point]  # mm, centered at (0,0)
     finger_holes: list[FingerHole] = []  # mm, relative to tool origin
+    interior_rings: list[list[Point]] = []  # mm, centered at (0,0)
     source_session_id: str | None = None
     thumbnail_path: str | None = None
     created_at: str | None = None
@@ -192,6 +194,7 @@ class ToolSummary(BaseModel):
     created_at: str | None
     point_count: int
     points: list[Point] = []
+    interior_rings: list[list[Point]] = []
     thumbnail_url: str | None = None
 
 
@@ -217,6 +220,7 @@ class PlacedTool(BaseModel):
     name: str
     points: list[Point]  # mm, bin-space
     finger_holes: list[FingerHole] = []  # mm, bin-space
+    interior_rings: list[list[Point]] = []  # mm, bin-space
     rotation: float = 0.0  # degrees, applied on top of library points
 
 
@@ -245,6 +249,7 @@ class BinModel(BaseModel):
 
 class BinPreviewTool(BaseModel):
     points: list[Point]
+    interior_rings: list[list[Point]] = []
 
 class BinSummary(BaseModel):
     id: str

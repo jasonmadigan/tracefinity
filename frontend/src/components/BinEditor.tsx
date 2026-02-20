@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Hand, Trash2, Magnet, Type, Pencil } from 'lucide-react'
 import type { PlacedTool, TextLabel } from '@/types'
+import { polygonPathData } from '@/lib/svg'
 
 interface Props {
   placedTools: PlacedTool[]
@@ -27,8 +28,8 @@ type Selection =
   | null
 
 type DragState =
-  | { type: 'tool'; toolId: string; startX: number; startY: number; origPoints: { x: number; y: number }[]; origHoles: { id: string; x: number; y: number }[] }
-  | { type: 'rotate'; toolId: string; centerX: number; centerY: number; startAngle: number; origRotation: number; origPoints: { x: number; y: number }[]; origHoles: { id: string; x: number; y: number }[] }
+  | { type: 'tool'; toolId: string; startX: number; startY: number; origPoints: { x: number; y: number }[]; origHoles: { id: string; x: number; y: number }[]; origInteriorRings: { x: number; y: number }[][] }
+  | { type: 'rotate'; toolId: string; centerX: number; centerY: number; startAngle: number; origRotation: number; origPoints: { x: number; y: number }[]; origHoles: { id: string; x: number; y: number }[]; origInteriorRings: { x: number; y: number }[][] }
   | { type: 'label'; labelId: string; startX: number; startY: number; origX: number; origY: number }
   | { type: 'rotate-label'; labelId: string; centerX: number; centerY: number; startAngle: number; origRotation: number }
   | null
@@ -99,6 +100,9 @@ export function BinEditor({
       ...tool,
       points: tool.points.map(p => ({ x: p.x + dx, y: p.y + dy })),
       finger_holes: tool.finger_holes.map(fh => ({ ...fh, x: fh.x + dx, y: fh.y + dy })),
+      interior_rings: (tool.interior_rings ?? []).map(ring =>
+        ring.map(p => ({ x: p.x + dx, y: p.y + dy }))
+      ),
     }))
     onPlacedToolsChange(updated)
   }, [getAllBounds, binWidthMm, binHeightMm, placedTools, onPlacedToolsChange])
@@ -137,6 +141,7 @@ export function BinEditor({
       startY: pos.y,
       origPoints: tool.points.map(p => ({ x: p.x, y: p.y })),
       origHoles: tool.finger_holes.map(fh => ({ id: fh.id, x: fh.x, y: fh.y })),
+      origInteriorRings: (tool.interior_rings ?? []).map(ring => ring.map(p => ({ x: p.x, y: p.y }))),
     })
   }
 
@@ -158,6 +163,7 @@ export function BinEditor({
       origRotation: tool.rotation || 0,
       origPoints: tool.points.map(p => ({ x: p.x, y: p.y })),
       origHoles: tool.finger_holes.map(fh => ({ id: fh.id, x: fh.x, y: fh.y })),
+      origInteriorRings: (tool.interior_rings ?? []).map(ring => ring.map(p => ({ x: p.x, y: p.y }))),
     })
   }
 
@@ -216,6 +222,9 @@ export function BinEditor({
             if (!orig) return fh
             return { ...fh, x: orig.x + dx, y: orig.y + dy }
           }),
+          interior_rings: dragging.origInteriorRings.map(ring =>
+            ring.map(p => ({ x: p.x + dx, y: p.y + dy }))
+          ),
         }
       })
       onChange(updated)
@@ -245,6 +254,13 @@ export function BinEditor({
             const fdy = orig.y - cy
             return { ...fh, x: cx + fdx * cos - fdy * sin, y: cy + fdx * sin + fdy * cos }
           }),
+          interior_rings: dragging.origInteriorRings.map(ring =>
+            ring.map(p => {
+              const pdx = p.x - cx
+              const pdy = p.y - cy
+              return { x: cx + pdx * cos - pdy * sin, y: cy + pdx * sin + pdy * cos }
+            })
+          ),
         }
       })
       onChange(updated)
@@ -507,15 +523,14 @@ export function BinEditor({
           })()}
 
           {placedTools.map(tool => {
-            const pathData = tool.points
-              .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x * DISPLAY_SCALE} ${p.y * DISPLAY_SCALE}`)
-              .join(' ') + ' Z'
+            const pathData = polygonPathData(tool.points, tool.interior_rings, DISPLAY_SCALE)
             const isSelected = selection?.type === 'tool' && selection.toolId === tool.id
 
             return (
               <g key={tool.id} onClick={stopClick}>
                 <path
                   d={pathData}
+                  fillRule="evenodd"
                   fill={isSelected ? 'rgb(52, 52, 58)' : 'rgb(63, 63, 70)'}
                   stroke={isSelected ? 'rgb(161, 161, 170)' : 'rgb(113, 113, 122)'}
                   strokeWidth={handleStroke}

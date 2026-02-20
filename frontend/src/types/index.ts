@@ -33,6 +33,7 @@ export interface Polygon {
   points: Point[]
   label: string
   finger_holes: FingerHole[]
+  interior_rings?: Point[][]
 }
 
 export interface TextLabel {
@@ -124,6 +125,7 @@ export interface Tool {
   name: string
   points: Point[]
   finger_holes: FingerHole[]
+  interior_rings?: Point[][]
   source_session_id: string | null
   created_at: string | null
 }
@@ -134,6 +136,7 @@ export interface ToolSummary {
   created_at: string | null
   point_count: number
   points: Point[]
+  interior_rings?: Point[][]
   thumbnail_url: string | null
 }
 
@@ -145,6 +148,7 @@ export interface PlacedTool {
   name: string
   points: Point[]
   finger_holes: FingerHole[]
+  interior_rings?: Point[][]
   rotation: number
 }
 
@@ -160,6 +164,7 @@ export interface BinData {
 
 export interface BinPreviewTool {
   points: Point[]
+  interior_rings?: Point[][]
 }
 
 export interface BinSummary {

@@ -5,6 +5,7 @@ import { Plus, Loader2, Search } from 'lucide-react'
 import { listTools } from '@/lib/api'
 import type { ToolSummary, PlacedTool, Point } from '@/types'
 import { getTool } from '@/lib/api'
+import { polygonPathData } from '@/lib/svg'
 
 interface Props {
   onAddTool: (tool: PlacedTool) => void
@@ -12,7 +13,7 @@ interface Props {
   binHeightMm: number
 }
 
-function ToolThumbnail({ points }: { points: Point[] }) {
+function ToolThumbnail({ points, interiorRings }: { points: Point[]; interiorRings?: Point[][] }) {
   if (points.length === 0) return null
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
@@ -31,12 +32,13 @@ function ToolThumbnail({ points }: { points: Point[] }) {
   const vw = w + pad * 2
   const vh = h + pad * 2
 
-  const pathData = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z'
+  const pathData = polygonPathData(points, interiorRings)
 
   return (
     <svg viewBox={`${vx} ${vy} ${vw} ${vh}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
       <path
         d={pathData}
+        fillRule="evenodd"
         fill="rgb(100, 116, 139)"
         stroke="rgb(148, 163, 184)"
         strokeWidth={Math.max(vw, vh) * 0.015}
@@ -86,6 +88,9 @@ export function ToolBrowser({ onAddTool, binWidthMm, binHeightMm }: Props) {
         name: tool.name,
         points: tool.points.map(p => ({ x: p.x + dx, y: p.y + dy })),
         finger_holes: tool.finger_holes.map(fh => ({ ...fh, x: fh.x + dx, y: fh.y + dy })),
+        interior_rings: (tool.interior_rings ?? []).map(ring =>
+          ring.map(p => ({ x: p.x + dx, y: p.y + dy }))
+        ),
         rotation: 0,
       }
       onAddTool(placed)
@@ -139,7 +144,7 @@ export function ToolBrowser({ onAddTool, binWidthMm, binHeightMm }: Props) {
             {adding === tool.id ? (
               <Loader2 className="w-5 h-5 animate-spin text-text-muted" />
             ) : (
-              <ToolThumbnail points={tool.points} />
+              <ToolThumbnail points={tool.points} interiorRings={tool.interior_rings} />
             )}
           </div>
           <div className="px-1.5 py-1 flex items-center justify-between gap-1">

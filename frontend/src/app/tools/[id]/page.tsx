@@ -142,6 +142,7 @@ export default function ToolPage() {
         <ToolEditor
           points={tool.points}
           fingerHoles={tool.finger_holes}
+          interiorRings={tool.interior_rings}
           onPointsChange={handlePointsChange}
           onFingerHolesChange={handleFingerHolesChange}
         />

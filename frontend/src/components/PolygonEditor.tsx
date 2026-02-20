@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Point, Polygon } from '@/types'
 import { Undo2, Redo2, Trash2, Plus, Minus, Move, MousePointer2 } from 'lucide-react'
+import { polygonPathData } from '@/lib/svg'
 
 interface Props {
   imageUrl: string
@@ -407,14 +408,13 @@ export function PolygonEditor({
         >
           {polygons.map((poly) => {
             const isSelected = selected === poly.id
-            const points = poly.points
-              .map((p) => `${p.x},${p.y}`)
-              .join(' ')
+            const pathData = polygonPathData(poly.points, poly.interior_rings)
 
             return (
               <g key={poly.id}>
-                <polygon
-                  points={points}
+                <path
+                  d={pathData}
+                  fillRule="evenodd"
                   fill={isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.15)'}
                   stroke={isSelected ? 'rgb(37, 99, 235)' : 'rgb(59, 130, 246)'}
                   strokeWidth={uiScale * (isSelected ? 2 : 1)}

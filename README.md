@@ -52,20 +52,16 @@ cd tracefinity
 # Optional: set your Gemini API key (or use the manual mask upload workflow)
 export GOOGLE_API_KEY=your-key
 
-# Backend
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+# First time setup
+cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+cd ../frontend && npm install
+cd ..
 
-# Frontend (new terminal)
-cd frontend
-npm install
-npm run dev
+# Run (starts backend on :8000 and frontend on :4001)
+make dev
 ```
 
-Open http://localhost:3000
+Open http://localhost:4001
 
 ## Features
 

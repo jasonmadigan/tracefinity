@@ -188,10 +188,10 @@ def _make_magnet_holes(config: GenerateRequest):
     return mf.Manifold.batch_boolean(holes, mf.OpType.Add)
 
 
-def _shapely_to_cross_sections(shifted_pts: list[tuple]) -> list[np.ndarray]:
+def _shapely_to_cross_sections(shifted_pts: list[tuple], interior_rings: list[list[tuple]] = None) -> list[np.ndarray]:
     """
     Validate and repair a polygon via Shapely before passing to Clipper2.
-    Returns a list of exterior ring arrays (one per simple sub-polygon).
+    Returns a list of ring arrays (exterior + hole rings for EvenOdd fill).
 
     Two-stage repair:
     1. buffer(0) for polygons that are already self-intersecting (GEOS-invalid)
@@ -201,7 +201,8 @@ def _shapely_to_cross_sections(shifted_pts: list[tuple]) -> list[np.ndarray]:
     """
     from shapely.geometry import Polygon as _SPoly, MultiPolygon as _SMPoly
 
-    sp = _SPoly(shifted_pts)
+    holes = interior_rings if interior_rings else []
+    sp = _SPoly(shifted_pts, holes=holes)
 
     if not sp.is_valid:
         sp = sp.buffer(0)
@@ -225,6 +226,11 @@ def _shapely_to_cross_sections(shifted_pts: list[tuple]) -> list[np.ndarray]:
         if p.is_empty or p.area <= 0:
             continue
         rings.append(np.array(p.exterior.coords[:-1], dtype=np.float64))
+        # include interior rings (holes) for EvenOdd fill
+        for interior in p.interiors:
+            hole_coords = interior.coords[:-1]
+            if len(hole_coords) >= 3:
+                rings.append(np.array(hole_coords, dtype=np.float64))
     return rings
 
 
@@ -247,19 +253,32 @@ def _make_polygon_cutouts(
         ]
         if len(shifted) < 3:
             continue
+        # shift interior rings the same way
+        shifted_holes = []
+        for hole in (poly.interior_rings_mm or []):
+            shifted_hole = [
+                (p[0] + offset_x, -(p[1] + offset_y))
+                for p in hole
+            ]
+            if len(shifted_hole) >= 3:
+                shifted_holes.append(shifted_hole)
         try:
-            rings = _shapely_to_cross_sections(shifted)
-            for ring_pts in rings:
-                if len(ring_pts) < 3:
-                    continue
-                cs = mf.CrossSection([ring_pts])
-                if cs.area() <= 0:
-                    cs = mf.CrossSection([ring_pts[::-1]])
-                if cs.area() > 0:
-                    cutter = mf.Manifold.extrude(cs, pocket_depth + 0.01).translate(
-                        (0.0, 0.0, wall_top_z - pocket_depth)
-                    )
-                    cutters.append(cutter)
+            rings = _shapely_to_cross_sections(shifted, shifted_holes)
+            if not rings:
+                continue
+            has_holes = len(rings) > 1
+            if has_holes:
+                # use EvenOdd to handle holes — same pattern as text labels
+                cs = mf.CrossSection(rings, mf.FillRule.EvenOdd)
+            else:
+                cs = mf.CrossSection(rings)
+            if cs.area() <= 0:
+                cs = mf.CrossSection([r[::-1] for r in rings], mf.FillRule.EvenOdd if has_holes else mf.FillRule.Positive)
+            if cs.area() > 0:
+                cutter = mf.Manifold.extrude(cs, pocket_depth + 0.01).translate(
+                    (0.0, 0.0, wall_top_z - pocket_depth)
+                )
+                cutters.append(cutter)
         except Exception as e:
             logger.warning("polygon cutout failed: %s", e)
 

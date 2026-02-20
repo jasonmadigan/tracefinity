@@ -3,10 +3,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Move, Plus, Minus, Undo2, Redo2, Trash2, Circle, Square, RectangleHorizontal, Fingerprint, Magnet, RotateCw } from 'lucide-react'
 import type { Point, FingerHole } from '@/types'
+import { polygonPathData } from '@/lib/svg'
 
 interface Props {
   points: Point[]
   fingerHoles: FingerHole[]
+  interiorRings?: Point[][]
   onPointsChange: (points: Point[]) => void
   onFingerHolesChange: (holes: FingerHole[]) => void
 }
@@ -29,6 +31,7 @@ type DragState =
   | { type: 'resize'; holeId: string; startX: number; startY: number; origRadius: number; origWidth?: number; origHeight?: number; centerX: number; centerY: number }
   | { type: 'rotate-hole'; holeId: string; centerX: number; centerY: number; startAngle: number; origRotation: number }
   | { type: 'rotate-polygon'; centerX: number; centerY: number; startAngle: number; origPoints: Point[]; origHoles: FingerHole[] }
+  | { type: 'pan'; startClientX: number; startClientY: number; origPanX: number; origPanY: number; svgScale: number }
   | null
 
 interface HistoryEntry {
@@ -36,12 +39,16 @@ interface HistoryEntry {
   fingerHoles: FingerHole[]
 }
 
-export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesChange }: Props) {
+export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange, onFingerHolesChange }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [selection, setSelection] = useState<Selection>(null)
   const [editMode, setEditMode] = useState<EditMode>('select')
   const [dragging, setDragging] = useState<DragState>(null)
   const [snapEnabled, setSnapEnabled] = useState(true)
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const spaceHeld = useRef(false)
+  const didPanRef = useRef(false)
 
   // undo/redo
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -67,6 +74,10 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
   useEffect(() => { dragHolesRef.current = dragHoles }, [dragHoles])
   useEffect(() => { onPointsRef.current = onPointsChange }, [onPointsChange])
   useEffect(() => { onHolesRef.current = onFingerHolesChange }, [onFingerHolesChange])
+  const zoomRef = useRef(zoom)
+  const panRef = useRef(pan)
+  useEffect(() => { zoomRef.current = zoom }, [zoom])
+  useEffect(() => { panRef.current = pan }, [pan])
 
   const pushHistory = useCallback((entry: HistoryEntry) => {
     if (isUndoRedo.current) {
@@ -149,28 +160,106 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
   const vbW = (bounds.maxX - bounds.minX + PADDING_MM * 2) * DISPLAY_SCALE
   const vbH = (bounds.maxY - bounds.minY + PADDING_MM * 2) * DISPLAY_SCALE
 
-  // grid lines (10mm spacing, centered on origin)
+  // zoomed viewBox
+  const zvbW = vbW / zoom
+  const zvbH = vbH / zoom
+  const zvbX = vbX + (vbW - zvbW) / 2 + pan.x
+  const zvbY = vbY + (vbH - zvbH) / 2 + pan.y
+
+  // grid lines (10mm spacing, centered on origin) — cover visible area
   const gridStep = 10
-  const gridMinX = Math.floor((bounds.minX - PADDING_MM) / gridStep) * gridStep
-  const gridMaxX = Math.ceil((bounds.maxX + PADDING_MM) / gridStep) * gridStep
-  const gridMinY = Math.floor((bounds.minY - PADDING_MM) / gridStep) * gridStep
-  const gridMaxY = Math.ceil((bounds.maxY + PADDING_MM) / gridStep) * gridStep
+  const visMinX = zvbX / DISPLAY_SCALE
+  const visMaxX = (zvbX + zvbW) / DISPLAY_SCALE
+  const visMinY = zvbY / DISPLAY_SCALE
+  const visMaxY = (zvbY + zvbH) / DISPLAY_SCALE
+  const gridMinX = Math.floor(visMinX / gridStep) * gridStep
+  const gridMaxX = Math.ceil(visMaxX / gridStep) * gridStep
+  const gridMinY = Math.floor(visMinY / gridStep) * gridStep
+  const gridMaxY = Math.ceil(visMaxY / gridStep) * gridStep
 
   const screenToMm = useCallback((clientX: number, clientY: number): Point => {
     if (!svgRef.current) return { x: 0, y: 0 }
     const rect = svgRef.current.getBoundingClientRect()
-    const scaleX = vbW / rect.width
-    const scaleY = vbH / rect.height
+    const scaleX = zvbW / rect.width
+    const scaleY = zvbH / rect.height
     const scale = Math.max(scaleX, scaleY)
-    const offsetX = (rect.width * scale - vbW) / 2
-    const offsetY = (rect.height * scale - vbH) / 2
-    const svgX = (clientX - rect.left) * scale - offsetX + vbX
-    const svgY = (clientY - rect.top) * scale - offsetY + vbY
+    const offsetX = (rect.width * scale - zvbW) / 2
+    const offsetY = (rect.height * scale - zvbH) / 2
+    const svgX = (clientX - rect.left) * scale - offsetX + zvbX
+    const svgY = (clientY - rect.top) * scale - offsetY + zvbY
     return { x: svgX / DISPLAY_SCALE, y: svgY / DISPLAY_SCALE }
-  }, [vbW, vbH, vbX, vbY])
+  }, [zvbW, zvbH, zvbX, zvbY])
 
   const screenToMmRef = useRef(screenToMm)
   useEffect(() => { screenToMmRef.current = screenToMm }, [screenToMm])
+
+  // scroll-to-zoom (needs passive: false for preventDefault)
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+      const oldZoom = zoomRef.current
+      const newZoom = Math.min(20, Math.max(0.5, oldZoom * factor))
+      if (newZoom === oldZoom) return
+
+      const rect = svg.getBoundingClientRect()
+      const curPan = panRef.current
+
+      // current zoomed viewBox
+      const curW = vbW / oldZoom
+      const curH = vbH / oldZoom
+      const curX = vbX + (vbW - curW) / 2 + curPan.x
+      const curY = vbY + (vbH - curH) / 2 + curPan.y
+
+      // cursor position in SVG space
+      const svgScale = Math.min(rect.width / curW, rect.height / curH)
+      const padLeft = (rect.width - curW * svgScale) / 2
+      const padTop = (rect.height - curH * svgScale) / 2
+      const cursorX = curX + (e.clientX - rect.left - padLeft) / svgScale
+      const cursorY = curY + (e.clientY - rect.top - padTop) / svgScale
+
+      // new viewBox (without pan adjustment)
+      const newW = vbW / newZoom
+      const newH = vbH / newZoom
+      const newX = vbX + (vbW - newW) / 2 + curPan.x
+      const newY = vbY + (vbH - newH) / 2 + curPan.y
+
+      // where cursor would map in new viewBox
+      const newSvgScale = Math.min(rect.width / newW, rect.height / newH)
+      const newPadLeft = (rect.width - newW * newSvgScale) / 2
+      const newPadTop = (rect.height - newH * newSvgScale) / 2
+      const newCursorX = newX + (e.clientX - rect.left - newPadLeft) / newSvgScale
+      const newCursorY = newY + (e.clientY - rect.top - newPadTop) / newSvgScale
+
+      // adjust pan so cursor stays fixed
+      setPan({ x: curPan.x + (cursorX - newCursorX), y: curPan.y + (cursorY - newCursorY) })
+      setZoom(newZoom)
+    }
+    svg.addEventListener('wheel', handleWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', handleWheel)
+  }, [vbW, vbH, vbX, vbY])
+
+  // space key for pan mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        spaceHeld.current = true
+      }
+    }
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spaceHeld.current = false
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [])
 
   const snapToGrid = useCallback((v: number) => {
     if (!snapEnabled) return v
@@ -305,6 +394,10 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
   }
 
   const handleBackgroundClick = (e: React.MouseEvent) => {
+    if (didPanRef.current) {
+      didPanRef.current = false
+      return
+    }
     if (editMode === 'finger-hole' || editMode === 'circle' || editMode === 'square' || editMode === 'rectangle') {
       const pos = screenToMm(e.clientX, e.clientY)
       const cutout = createCutout(snapToGrid(pos.x), snapToGrid(pos.y))
@@ -316,6 +409,29 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
       return
     }
     setSelection(null)
+  }
+
+  const handleSvgMouseDown = (e: React.MouseEvent) => {
+    const isPanTrigger = e.button === 1 || (e.button === 0 && spaceHeld.current)
+    if (!isPanTrigger) return
+    e.preventDefault()
+    if (!svgRef.current) return
+    const rect = svgRef.current.getBoundingClientRect()
+    const svgScale = Math.min(rect.width / zvbW, rect.height / zvbH)
+    setDragging({
+      type: 'pan',
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      origPanX: pan.x,
+      origPanY: pan.y,
+      svgScale,
+    })
+  }
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    // only reset on background double-click (not on elements that stopPropagation)
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
   }
 
   const stopClick = (e: React.MouseEvent) => e.stopPropagation()
@@ -376,11 +492,20 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
       })
       setDragPoints(newPts)
       setDragHoles(newHoles)
+    } else if (dragging.type === 'pan') {
+      const dx = (e.clientX - dragging.startClientX) / dragging.svgScale
+      const dy = (e.clientY - dragging.startClientY) / dragging.svgScale
+      setPan({ x: dragging.origPanX - dx, y: dragging.origPanY - dy })
+      didPanRef.current = true
     }
   }, [dragging])
 
   const handleMouseUp = useCallback(() => {
     if (dragging) {
+      if (dragging.type === 'pan') {
+        setDragging(null)
+        return
+      }
       const finalPoints = dragPointsRef.current ?? pointsRef.current
       const finalHoles = dragHolesRef.current ?? holesRef.current
       // flush to parent
@@ -567,14 +692,16 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
       <div className="flex-1 min-h-0 bg-inset rounded-lg p-4 flex items-center justify-center">
         <svg
           ref={svgRef}
-          viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+          viewBox={`${zvbX} ${zvbY} ${zvbW} ${zvbH}`}
           preserveAspectRatio="xMidYMid meet"
-          className={`rounded max-w-full max-h-full ${isCutoutMode ? 'cursor-crosshair' : 'cursor-default'}`}
-          style={{ overflow: 'visible' }}
+          className={`rounded w-full h-full ${isCutoutMode ? 'cursor-crosshair' : 'cursor-default'}`}
+          style={{ overflow: 'hidden', backgroundColor: 'rgb(30, 41, 59)' }}
           onClick={handleBackgroundClick}
+          onMouseDown={handleSvgMouseDown}
+          onDoubleClick={handleDoubleClick}
         >
           {/* background fill */}
-          <rect x={vbX} y={vbY} width={vbW} height={vbH} fill="rgb(30, 41, 59)" />
+          <rect x={zvbX} y={zvbY} width={zvbW} height={zvbH} fill="rgb(30, 41, 59)" />
 
           {/* grid lines */}
           {Array.from({ length: Math.ceil((gridMaxX - gridMinX) / gridStep) + 1 }).map((_, i) => {
@@ -586,7 +713,7 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
                 x1={x} y1={gridMinY * DISPLAY_SCALE}
                 x2={x} y2={gridMaxY * DISPLAY_SCALE}
                 stroke={isOrigin ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)'}
-                strokeWidth={isOrigin ? 1.5 : 0.5}
+                strokeWidth={(isOrigin ? 1.5 : 0.5) / zoom}
               />
             )
           })}
@@ -599,17 +726,18 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
                 x1={gridMinX * DISPLAY_SCALE} y1={y}
                 x2={gridMaxX * DISPLAY_SCALE} y2={y}
                 stroke={isOrigin ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)'}
-                strokeWidth={isOrigin ? 1.5 : 0.5}
+                strokeWidth={(isOrigin ? 1.5 : 0.5) / zoom}
               />
             )
           })}
 
           {/* polygon fill */}
-          <polygon
-            points={displayPoints.map(p => `${p.x * DISPLAY_SCALE},${p.y * DISPLAY_SCALE}`).join(' ')}
+          <path
+            d={polygonPathData(displayPoints, interiorRings, DISPLAY_SCALE)}
+            fillRule="evenodd"
             fill="rgb(71, 85, 105)"
             stroke="rgb(148, 163, 184)"
-            strokeWidth={2}
+            strokeWidth={2 / zoom}
           />
 
           {/* edge click targets for add-vertex mode */}
@@ -699,7 +827,7 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
                     cx={x} cy={y} r={r}
                     fill={isSelected ? 'rgb(30, 41, 59)' : 'rgb(51, 65, 85)'}
                     stroke={isSelected ? 'rgb(59, 130, 246)' : 'rgb(30, 41, 59)'}
-                    strokeWidth={isSelected ? 3 : 1}
+                    strokeWidth={(isSelected ? 3 : 1) / zoom}
                     className={editMode === 'select' ? 'cursor-move' : 'cursor-default'}
                     onMouseDown={handleHoleMouseDown(fh.id)}
                     onClick={stopClick}
@@ -710,7 +838,7 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
                     x={x - w / 2} y={y - h / 2} width={w} height={h}
                     fill={isSelected ? 'rgb(30, 41, 59)' : 'rgb(51, 65, 85)'}
                     stroke={isSelected ? 'rgb(59, 130, 246)' : 'rgb(30, 41, 59)'}
-                    strokeWidth={isSelected ? 3 : 1}
+                    strokeWidth={(isSelected ? 3 : 1) / zoom}
                     className={editMode === 'select' ? 'cursor-move' : 'cursor-default'}
                     onMouseDown={handleHoleMouseDown(fh.id)}
                     onClick={stopClick}
@@ -771,6 +899,9 @@ export function ToolEditor({ points, fingerHoles, onPointsChange, onFingerHolesC
       <div className="flex items-center justify-between text-sm flex-shrink-0">
         <span className="text-text-muted">
           {displayPoints.length} vertices, {displayHoles.length} cutout{displayHoles.length !== 1 ? 's' : ''}
+        </span>
+        <span className="text-text-muted">
+          {Math.round(zoom * 100)}%{zoom !== 1 && ' · double-click to reset'}
         </span>
       </div>
     </div>

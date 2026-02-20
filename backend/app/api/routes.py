@@ -529,6 +529,7 @@ async def list_tools(request: Request, user_id: str = Depends(get_user_id)):
             created_at=tool.created_at,
             point_count=len(tool.points),
             points=tool.points,
+            interior_rings=tool.interior_rings,
             thumbnail_url=thumb_url,
         ))
     summaries.sort(key=lambda t: t.created_at or "", reverse=True)
@@ -632,6 +633,14 @@ async def save_tools_from_session(request: Request, session_id: str, user_id: st
         cy = (min(ys) + max(ys)) / 2
         centered = [Point(x=p[0] - cx, y=p[1] - cy) for p in points_mm]
 
+        # scale and center interior rings
+        interior_rings_centered = []
+        for ring in poly.interior_rings:
+            ring_mm = [(p.x * sf, p.y * sf) for p in ring]
+            interior_rings_centered.append(
+                [Point(x=p[0] - cx, y=p[1] - cy) for p in ring_mm]
+            )
+
         fholes = []
         for fh in poly.finger_holes:
             fholes.append(FingerHole(
@@ -673,6 +682,7 @@ async def save_tools_from_session(request: Request, session_id: str, user_id: st
             name=poly.label,
             points=centered,
             finger_holes=fholes,
+            interior_rings=interior_rings_centered,
             source_session_id=session_id,
             thumbnail_path=thumbnail_path,
             created_at=datetime.utcnow().isoformat(),
@@ -698,7 +708,7 @@ async def list_bins(request: Request, user_id: str = Depends(get_user_id)):
             has_stl=bin_data.stl_path is not None,
             grid_x=bin_data.bin_config.grid_x,
             grid_y=bin_data.bin_config.grid_y,
-            preview_tools=[BinPreviewTool(points=pt.points) for pt in bin_data.placed_tools],
+            preview_tools=[BinPreviewTool(points=pt.points, interior_rings=pt.interior_rings) for pt in bin_data.placed_tools],
         ))
     summaries.sort(key=lambda b: b.created_at or "", reverse=True)
     return BinListResponse(bins=summaries)
@@ -781,6 +791,7 @@ async def create_bin(request: Request, req: CreateBinRequest, user_id: str = Dep
             name=tool.name,
             points=list(tool.points),
             finger_holes=list(tool.finger_holes),
+            interior_rings=list(tool.interior_rings),
         ))
 
     bc = BinConfig()
@@ -811,6 +822,10 @@ async def create_bin(request: Request, req: CreateBinRequest, user_id: str = Dep
                            radius=fh.radius, width=fh.width, height=fh.height,
                            rotation=fh.rotation, shape=fh.shape)
                 for fh in pt.finger_holes
+            ]
+            pt.interior_rings = [
+                [Point(x=p.x + offset_x, y=p.y + offset_y) for p in ring]
+                for ring in pt.interior_rings
             ]
 
     bin_data = BinModel(
@@ -909,7 +924,11 @@ def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_u
             )
             for fh in pt.finger_holes
         ]
-        sp = ScaledPolygon(pt.id, points_mm, pt.name, fholes)
+        interior_rings_mm = [
+            [(p.x, p.y) for p in ring]
+            for ring in pt.interior_rings
+        ]
+        sp = ScaledPolygon(pt.id, points_mm, pt.name, fholes, interior_rings_mm)
         sp = polygon_scaler.add_clearance(sp, bc.cutout_clearance)
         sp = polygon_scaler.simplify(sp)
         scaled.append(sp)

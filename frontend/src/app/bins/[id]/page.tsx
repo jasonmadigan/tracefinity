@@ -205,6 +205,9 @@ export default function BinPage() {
         ...tool,
         points: tool.points.map(p => ({ x: p.x + dx, y: p.y + dy })),
         finger_holes: tool.finger_holes.map(fh => ({ ...fh, x: fh.x + dx, y: fh.y + dy })),
+        interior_rings: (tool.interior_rings ?? []).map(ring =>
+          ring.map(p => ({ x: p.x + dx, y: p.y + dy }))
+        ),
       }
       setConfig(prev => ({ ...prev, grid_x: needX, grid_y: needY }))
     }

@@ -6,11 +6,12 @@ import { ImageUploader } from '@/components/ImageUploader'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { uploadImage, listTools, listBins, deleteTool, deleteBin, createBin, getImageUrl } from '@/lib/api'
 import type { ToolSummary, BinSummary, BinPreviewTool, Point } from '@/types'
+import { polygonPathData } from '@/lib/svg'
 import { Trash2, Clock, Package, Plus, Loader2 } from 'lucide-react'
 import { Alert } from '@/components/Alert'
 import { PhotoIllustration, CornersIllustration, TraceIllustration, OrganiseIllustration } from '@/components/OnboardingIllustrations'
 
-function ToolOutline({ points }: { points: Point[] }) {
+function ToolOutline({ points, interiorRings }: { points: Point[]; interiorRings?: Point[][] }) {
   if (points.length === 0) return null
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
@@ -29,12 +30,13 @@ function ToolOutline({ points }: { points: Point[] }) {
   const vw = w + pad * 2
   const vh = h + pad * 2
 
-  const pathData = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z'
+  const pathData = polygonPathData(points, interiorRings)
 
   return (
     <svg viewBox={`${vx} ${vy} ${vw} ${vh}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
       <path
         d={pathData}
+        fillRule="evenodd"
         fill="rgb(100, 116, 139)"
         stroke="rgb(148, 163, 184)"
         strokeWidth={Math.max(vw, vh) * 0.012}
@@ -72,9 +74,9 @@ function BinPreview({ gridX, gridY, tools }: { gridX: number; gridY: number; too
         />
       ))}
       {tools.map((tool, ti) => {
-        const d = tool.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z'
+        const d = polygonPathData(tool.points, tool.interior_rings)
         return (
-          <path key={ti} d={d} fill="rgb(100, 116, 139)" stroke="rgb(148, 163, 184)" strokeWidth={0.8} />
+          <path key={ti} d={d} fillRule="evenodd" fill="rgb(100, 116, 139)" stroke="rgb(148, 163, 184)" strokeWidth={0.8} />
         )
       })}
     </svg>
@@ -271,12 +273,12 @@ export default function HomePage() {
                         className="absolute inset-0 w-full h-full object-contain p-2 transition-opacity group-hover:opacity-30"
                       />
                       <div className="absolute inset-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <ToolOutline points={tool.points} />
+                        <ToolOutline points={tool.points} interiorRings={tool.interior_rings} />
                       </div>
                     </>
                   ) : (
                     <div className="w-full h-full p-4 flex items-center justify-center">
-                      <ToolOutline points={tool.points} />
+                      <ToolOutline points={tool.points} interiorRings={tool.interior_rings} />
                     </div>
                   )}
                 </div>

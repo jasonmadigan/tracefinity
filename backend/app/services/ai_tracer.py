@@ -63,14 +63,19 @@ class AITracer:
             labels = [f"tool {i + 1}" for i in range(len(contours))]
 
         polygons = []
-        for i, contour in enumerate(contours):
+        for i, (exterior, holes) in enumerate(contours):
             label = labels[i] if i < len(labels) else f"tool {i + 1}"
-            points = [Point(x=p[0], y=p[1]) for p in contour]
+            points = [Point(x=p[0], y=p[1]) for p in exterior]
+            interior_rings = [
+                [Point(x=p[0], y=p[1]) for p in hole]
+                for hole in holes
+            ]
             polygons.append(
                 Polygon(
                     id=str(uuid.uuid4()),
                     points=points,
                     label=label,
+                    interior_rings=interior_rings,
                 )
             )
 
@@ -133,8 +138,8 @@ class AITracer:
         except Exception:
             raise
 
-    def _trace_mask(self, mask_path: str, original_path: str, min_area: int = 5000) -> list[list[tuple[float, float]]]:
-        """trace contours from mask image"""
+    def _trace_mask(self, mask_path: str, original_path: str, min_area: int = 5000) -> list[tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]]:
+        """trace contours from mask image. returns list of (exterior, [holes])."""
         from shapely.geometry import Polygon as ShapelyPolygon
         from shapely.ops import unary_union
 
@@ -176,24 +181,54 @@ class AITracer:
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
 
-        mask_contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not mask_contours:
+        mask_contours, hierarchy = cv2.findContours(thresh, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        if not mask_contours or hierarchy is None:
             return []
 
+        hierarchy = hierarchy[0]  # shape: (N, 4) — [next, prev, child, parent]
+
+        # build parent→children mapping from hierarchy
+        parent_children: dict[int, list[int]] = {}
+        for i, h in enumerate(hierarchy):
+            parent_idx = h[3]
+            if parent_idx == -1:
+                # top-level contour
+                if i not in parent_children:
+                    parent_children[i] = []
+            else:
+                parent_children.setdefault(parent_idx, []).append(i)
+
         shapely_polys = []
-        for contour in mask_contours:
+        for parent_idx, child_indices in parent_children.items():
+            if hierarchy[parent_idx][3] != -1:
+                # not a top-level contour, skip
+                continue
+
+            contour = mask_contours[parent_idx]
             area = cv2.contourArea(contour)
             if area < min_area:
                 continue
 
-            points = [(float(p[0][0]), float(p[0][1])) for p in contour]
-            if len(points) >= 4:
-                try:
-                    poly = ShapelyPolygon(points)
-                    if poly.is_valid and poly.area > min_area:
-                        shapely_polys.append(poly)
-                except Exception:
-                    continue
+            exterior_pts = [(float(p[0][0]), float(p[0][1])) for p in contour]
+            if len(exterior_pts) < 4:
+                continue
+
+            # collect hole contours
+            holes = []
+            for ci in child_indices:
+                hole_contour = mask_contours[ci]
+                hole_pts = [(float(p[0][0]), float(p[0][1])) for p in hole_contour]
+                if len(hole_pts) >= 4 and cv2.contourArea(hole_contour) >= min_area // 4:
+                    holes.append(hole_pts)
+
+            try:
+                poly = ShapelyPolygon(exterior_pts, holes=holes)
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                if poly.area > min_area:
+                    shapely_polys.append(poly)
+            except Exception:
+                continue
 
         if not shapely_polys:
             return []
@@ -210,28 +245,39 @@ class AITracer:
         for poly in polys_to_process:
             if poly.area < min_area:
                 continue
-            simplified = poly.simplify(3.0, preserve_topology=True)
+            simplified = poly.simplify(4.0, preserve_topology=True)
             coords = list(simplified.exterior.coords)[:-1]
-            if len(coords) >= 4:
-                clamped = [
-                    (max(0, min(target_w, x)), max(0, min(target_h, y)))
-                    for x, y in coords
-                ]
-                results.append(clamped)
+            if len(coords) < 4:
+                continue
+            clamped = [
+                (max(0, min(target_w, x)), max(0, min(target_h, y)))
+                for x, y in coords
+            ]
+            # extract interior rings (holes)
+            hole_rings = []
+            for interior in simplified.interiors:
+                hole_coords = list(interior.coords)[:-1]
+                if len(hole_coords) >= 3:
+                    hole_clamped = [
+                        (max(0, min(target_w, x)), max(0, min(target_h, y)))
+                        for x, y in hole_coords
+                    ]
+                    hole_rings.append(hole_clamped)
+            results.append((clamped, hole_rings))
 
         return results
 
     async def _get_labels(
         self,
         image_path: str,
-        contours: list[list[tuple[float, float]]],
+        contours: list[tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]],
         api_key: str,
     ) -> list[str]:
         """use gemini to identify what each detected contour is"""
         positions = []
-        for i, contour in enumerate(contours):
-            cx = sum(p[0] for p in contour) / len(contour)
-            cy = sum(p[1] for p in contour) / len(contour)
+        for i, (exterior, _holes) in enumerate(contours):
+            cx = sum(p[0] for p in exterior) / len(exterior)
+            cy = sum(p[1] for p in exterior) / len(exterior)
             positions.append(f"{i + 1}. x={int(cx)}, y={int(cy)}")
 
         prompt = LABEL_PROMPT.format(

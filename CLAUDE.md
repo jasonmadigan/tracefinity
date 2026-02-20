@@ -13,9 +13,12 @@ See [docs/gotchas.md](docs/gotchas.md) for Y-axis inversion, memory leaks, Docke
 # docker
 docker run -p 3000:3000 -v ./data:/app/storage -e GOOGLE_API_KEY=your-key ghcr.io/jasonmadigan/tracefinity
 
-# local
-cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000
-cd frontend && npm run dev
+# local (first time setup)
+cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+cd frontend && npm install
+
+# local (day-to-day)
+make dev  # starts backend (:8000) and frontend (:4001) concurrently
 ```
 
 ## Key Constraints
