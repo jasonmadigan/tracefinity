@@ -1,16 +1,20 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { MousePointer2, Plus, Minus, Undo2, Redo2, Trash2, Circle, Square, RectangleHorizontal, Fingerprint, Magnet, RotateCw, RotateCcw, ChevronDown } from 'lucide-react'
 import type { Point, FingerHole } from '@/types'
-import { polygonPathData } from '@/lib/svg'
+import { polygonPathData, smoothPathData, simplifyPolygon } from '@/lib/svg'
 
 interface Props {
   points: Point[]
   fingerHoles: FingerHole[]
   interiorRings?: Point[][]
+  smoothed: boolean
+  smoothLevel: number
   onPointsChange: (points: Point[]) => void
   onFingerHolesChange: (holes: FingerHole[]) => void
+  onSmoothedChange: (smoothed: boolean) => void
+  onSmoothLevelChange: (level: number) => void
 }
 
 const DISPLAY_SCALE = 8
@@ -39,7 +43,7 @@ interface HistoryEntry {
   fingerHoles: FingerHole[]
 }
 
-export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange, onFingerHolesChange }: Props) {
+export function ToolEditor({ points, fingerHoles, interiorRings, smoothed, smoothLevel, onPointsChange, onFingerHolesChange, onSmoothedChange, onSmoothLevelChange }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [selection, setSelection] = useState<Selection>(null)
   const [editMode, setEditMode] = useState<EditMode>('select')
@@ -59,8 +63,19 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
   // local drag state: renders locally during drag, flushes to parent on mouseup
   const [dragPoints, setDragPoints] = useState<Point[] | null>(null)
   const [dragHoles, setDragHoles] = useState<FingerHole[] | null>(null)
-  const displayPoints = dragPoints ?? points
+  const rawDisplayPoints = dragPoints ?? points
   const displayHoles = dragHoles ?? fingerHoles
+  const smoothedPoints = useMemo(() => {
+    if (!smoothed || points.length <= 3) return null
+    let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity
+    for (const p of points) { mnX = Math.min(mnX, p.x); mnY = Math.min(mnY, p.y); mxX = Math.max(mxX, p.x); mxY = Math.max(mxY, p.y) }
+    const diag = Math.hypot(mxX - mnX, mxY - mnY)
+    // level 0 = gentle (0.002), level 1 = moderate (0.008)
+    const factor = 0.002 + smoothLevel * (0.008 - 0.002)
+    const epsilon = Math.max(0.3, diag * factor)
+    return simplifyPolygon(points, epsilon)
+  }, [smoothed, smoothLevel, points])
+  const displayPoints = smoothed && smoothedPoints ? smoothedPoints : rawDisplayPoints
 
   // refs for stale closure avoidance
   const pointsRef = useRef(points)
@@ -577,6 +592,7 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
               editMode === 'add-vertex' ? 'bg-accent-muted text-accent' : 'hover:bg-border/50 text-text-secondary'
             }`}
             title="Add vertex on edge"
+            disabled={smoothed}
           >
             <Plus className="w-4 h-4" />
             Add point
@@ -587,7 +603,7 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
               editMode === 'delete-vertex' ? 'bg-accent-muted text-accent' : 'hover:bg-border/50 text-text-secondary'
             }`}
             title="Delete vertex"
-            disabled={displayPoints.length <= 3}
+            disabled={smoothed || displayPoints.length <= 3}
           >
             <Minus className="w-4 h-4" />
             Remove
@@ -675,6 +691,32 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
             <Magnet className="w-3.5 h-3.5" />
             Snap
           </button>
+          <div className="flex items-center bg-elevated rounded overflow-hidden border border-border-subtle text-xs">
+            <button
+              onClick={() => onSmoothedChange(false)}
+              className={`px-2 py-1 transition-colors ${!smoothed ? 'bg-accent text-white' : 'text-text-muted hover:text-text-secondary'}`}
+            >
+              Accurate
+            </button>
+            <button
+              onClick={() => { onSmoothedChange(true); if (editMode === 'add-vertex' || editMode === 'delete-vertex') setEditMode('select') }}
+              className={`px-2 py-1 transition-colors ${smoothed ? 'bg-accent text-white' : 'text-text-muted hover:text-text-secondary'}`}
+            >
+              Smooth
+            </button>
+          </div>
+          {smoothed && (
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={smoothLevel}
+              onChange={e => onSmoothLevelChange(parseFloat(e.target.value))}
+              className="w-20 h-1 accent-accent"
+              title={`Smooth level: ${Math.round(smoothLevel * 100)}%`}
+            />
+          )}
         </div>
 
         {selection?.type === 'hole' && (
@@ -745,7 +787,7 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
 
           {/* polygon fill */}
           <path
-            d={polygonPathData(displayPoints, interiorRings, DISPLAY_SCALE)}
+            d={smoothed ? smoothPathData(displayPoints, interiorRings, DISPLAY_SCALE) : polygonPathData(displayPoints, interiorRings, DISPLAY_SCALE)}
             fillRule="evenodd"
             fill="rgb(71, 85, 105)"
             stroke="rgb(148, 163, 184)"
@@ -775,8 +817,8 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
             )
           })}
 
-          {/* vertex handles */}
-          {(editMode === 'select' || editMode === 'add-vertex' || editMode === 'delete-vertex') && displayPoints.map((p, idx) => (
+          {/* vertex handles (hidden when smoothed — points are derived) */}
+          {!smoothed && (editMode === 'select' || editMode === 'add-vertex' || editMode === 'delete-vertex') && displayPoints.map((p, idx) => (
             <circle
               key={`v-${idx}`}
               cx={p.x * DISPLAY_SCALE}
@@ -942,8 +984,10 @@ export function ToolEditor({ points, fingerHoles, interiorRings, onPointsChange,
 
       {/* bottom bar */}
       <div className="flex items-center justify-between text-xs flex-shrink-0">
-        <span className="text-text-muted">
-          {displayPoints.length} vertices, {displayHoles.length} cutout{displayHoles.length !== 1 ? 's' : ''}
+        <span className="text-text-secondary">
+          {displayPoints.length} vertices{smoothed ? ` (${points.length} raw)` : ''}, {displayHoles.length} cutout{displayHoles.length !== 1 ? 's' : ''}
+          {' \u00b7 '}
+          {((bounds.maxX - bounds.minX)).toFixed(1)}\u00d7{((bounds.maxY - bounds.minY)).toFixed(1)} mm
         </span>
         <span className="text-text-muted">
           {editMode === 'select' && 'Drag vertices or cutouts to move'}

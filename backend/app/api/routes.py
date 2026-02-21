@@ -530,6 +530,8 @@ async def list_tools(request: Request, user_id: str = Depends(get_user_id)):
             point_count=len(tool.points),
             points=tool.points,
             interior_rings=tool.interior_rings,
+            smoothed=tool.smoothed,
+            smooth_level=tool.smooth_level,
             thumbnail_url=thumb_url,
         ))
     summaries.sort(key=lambda t: t.created_at or "", reverse=True)
@@ -558,6 +560,10 @@ async def update_tool(request: Request, tool_id: str, req: ToolUpdateRequest, us
         tool.points = req.points
     if req.finger_holes is not None:
         tool.finger_holes = req.finger_holes
+    if req.smoothed is not None:
+        tool.smoothed = req.smoothed
+    if req.smooth_level is not None:
+        tool.smooth_level = req.smooth_level
     user_tools.set(tool_id, tool)
     return StatusResponse(status="ok")
 
@@ -880,7 +886,7 @@ async def delete_bin(request: Request, bin_id: str, user_id: str = Depends(get_u
 
 @router.post("/bins/{bin_id}/generate", response_model=GenerateResponse)
 def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_user_id)):
-    _, _, user_bins = get_stores(user_id)
+    _, user_tools, user_bins = get_stores(user_id)
     up = _user_path(user_id)
     bin_data = user_bins.get(bin_id)
     if not bin_data:
@@ -891,10 +897,19 @@ def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_u
     bc = bin_data.bin_config
 
     import hashlib, json
+    # include source tool smoothed state in hash so toggling invalidates cache
+    smoothed_flags = {}
+    for pt in bin_data.placed_tools:
+        src = user_tools.get(pt.tool_id)
+        smoothed_flags[pt.tool_id] = {
+            "smoothed": src.smoothed if src else False,
+            "smooth_level": src.smooth_level if src else 0.5,
+        }
     input_data = {
         "bin_config": bc.model_dump(),
         "placed_tools": [pt.model_dump() for pt in bin_data.placed_tools],
         "text_labels": [tl.model_dump() for tl in bin_data.text_labels],
+        "smoothed_flags": smoothed_flags,
     }
     input_hash = hashlib.md5(json.dumps(input_data, sort_keys=True, default=str).encode()).hexdigest()
     hash_path = up / "outputs" / f"{bin_id}.hash"
@@ -930,7 +945,11 @@ def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_u
         ]
         sp = ScaledPolygon(pt.id, points_mm, pt.name, fholes, interior_rings_mm)
         sp = polygon_scaler.add_clearance(sp, bc.cutout_clearance)
-        sp = polygon_scaler.simplify(sp)
+        source_tool = user_tools.get(pt.tool_id)
+        if source_tool and source_tool.smoothed:
+            sp = polygon_scaler.smooth(sp, level=source_tool.smooth_level)
+        else:
+            sp = polygon_scaler.simplify(sp)
         scaled.append(sp)
 
     gen_req = GenerateRequest(

@@ -183,6 +183,8 @@ class Tool(BaseModel):
     points: list[Point]  # mm, centered at (0,0)
     finger_holes: list[FingerHole] = []  # mm, relative to tool origin
     interior_rings: list[list[Point]] = []  # mm, centered at (0,0)
+    smoothed: bool = False
+    smooth_level: float = 0.0
     source_session_id: str | None = None
     thumbnail_path: str | None = None
     created_at: str | None = None
@@ -195,6 +197,8 @@ class ToolSummary(BaseModel):
     point_count: int
     points: list[Point] = []
     interior_rings: list[list[Point]] = []
+    smoothed: bool = False
+    smooth_level: float = 0.5
     thumbnail_url: str | None = None
 
 
@@ -202,6 +206,8 @@ class ToolUpdateRequest(BaseModel):
     name: str | None = None
     points: list[Point] | None = None
     finger_holes: list[FingerHole] | None = None
+    smoothed: bool | None = None
+    smooth_level: float | None = None
 
 
 class ToolListResponse(BaseModel):
@@ -218,7 +224,7 @@ class PlacedTool(BaseModel):
     id: str  # placement instance id
     tool_id: str  # reference to library tool
     name: str
-    points: list[Point]  # mm, bin-space
+    points: list[Point]  # mm, bin-space (always raw/accurate)
     finger_holes: list[FingerHole] = []  # mm, bin-space
     interior_rings: list[list[Point]] = []  # mm, bin-space
     rotation: float = 0.0  # degrees, applied on top of library points

@@ -48,7 +48,7 @@ export default function ToolPage() {
       setSaving(true)
       setSaved(false)
       try {
-        await updateTool(toolId, { name, points: tool.points, finger_holes: tool.finger_holes })
+        await updateTool(toolId, { name, points: tool.points, finger_holes: tool.finger_holes, smoothed: tool.smoothed, smooth_level: tool.smooth_level })
         setSaved(true)
         if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
         savedTimerRef.current = setTimeout(() => setSaved(false), 2000)
@@ -82,6 +82,14 @@ export default function ToolPage() {
 
   const handleFingerHolesChange = useCallback((finger_holes: FingerHole[]) => {
     setTool(prev => prev ? { ...prev, finger_holes } : null)
+  }, [])
+
+  const handleSmoothedChange = useCallback((smoothed: boolean) => {
+    setTool(prev => prev ? { ...prev, smoothed } : null)
+  }, [])
+
+  const handleSmoothLevelChange = useCallback((smooth_level: number) => {
+    setTool(prev => prev ? { ...prev, smooth_level } : null)
   }, [])
 
   const handleNameChange = (newName: string) => {
@@ -143,8 +151,12 @@ export default function ToolPage() {
           points={tool.points}
           fingerHoles={tool.finger_holes}
           interiorRings={tool.interior_rings}
+          smoothed={tool.smoothed}
+          smoothLevel={tool.smooth_level}
           onPointsChange={handlePointsChange}
           onFingerHolesChange={handleFingerHolesChange}
+          onSmoothedChange={handleSmoothedChange}
+          onSmoothLevelChange={handleSmoothLevelChange}
         />
       </div>
     </div>

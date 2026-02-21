@@ -6,7 +6,7 @@ import { BinEditor } from '@/components/BinEditor'
 import { BinConfigurator } from '@/components/BinConfigurator'
 import { BinPreview3D } from '@/components/BinPreview3D'
 import { ToolBrowser } from '@/components/ToolBrowser'
-import { getBin, updateBin, generateBinStl, getBinStlUrl, getBinZipUrl, getBinThreemfUrl, getImageUrl } from '@/lib/api'
+import { getBin, updateBin, generateBinStl, getBinStlUrl, getBinZipUrl, getBinThreemfUrl, getImageUrl, listTools, updateTool } from '@/lib/api'
 import { getSettings } from '@/lib/settings'
 import type { BinConfig, BinData, PlacedTool, TextLabel } from '@/types'
 import { Download, Loader2, Package, ArrowLeft } from 'lucide-react'
@@ -54,16 +54,21 @@ export default function BinPage() {
   const abortRef = useRef<AbortController | null>(null)
   const doGenerateRef = useRef<() => void>(() => {})
   const initialLoadRef = useRef(true)
+  const [smoothedToolIds, setSmoothedToolIds] = useState<Set<string>>(new Set())
+  const [smoothLevels, setSmoothLevels] = useState<Map<string, number>>(new Map())
+  const smoothLevelTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     async function load() {
       try {
-        const data = await getBin(binId)
+        const [data, tools] = await Promise.all([getBin(binId), listTools()])
         setBinData(data)
         setPlacedTools(data.placed_tools)
         setTextLabels(data.text_labels)
         setName(data.name || '')
         setConfig(data.bin_config)
+        setSmoothedToolIds(new Set(tools.filter(t => t.smoothed).map(t => t.id)))
+        setSmoothLevels(new Map(tools.map(t => [t.id, t.smooth_level])))
       } catch {
         setError('Bin not found')
       } finally {
@@ -80,7 +85,7 @@ export default function BinPage() {
   const doGenerate = useCallback(async () => {
     if (placedTools.length === 0) return
 
-    const key = JSON.stringify({ placedTools, config, textLabels })
+    const key = JSON.stringify({ placedTools, config, textLabels, smoothed: [...smoothedToolIds], levels: [...smoothLevels] })
     if (key === lastGenerateRef.current) return
 
     // abort any in-flight request
@@ -118,7 +123,7 @@ export default function BinPage() {
         abortRef.current = null
       }
     }
-  }, [binId, placedTools, config, textLabels])
+  }, [binId, placedTools, config, textLabels, smoothedToolIds, smoothLevels])
 
   useEffect(() => {
     doGenerateRef.current = doGenerate
@@ -171,10 +176,30 @@ export default function BinPage() {
     return () => {
       if (generateTimeoutRef.current) clearTimeout(generateTimeoutRef.current)
     }
-  }, [binData, placedTools, config, textLabels, doGenerate])
+  }, [binData, placedTools, config, textLabels, smoothedToolIds, smoothLevels, doGenerate])
 
   const handlePlacedToolsChange = useCallback((updated: PlacedTool[]) => {
     setPlacedTools(updated)
+  }, [])
+
+  const handleToggleSmoothed = useCallback(async (toolId: string, smoothed: boolean) => {
+    try {
+      await updateTool(toolId, { smoothed })
+      setSmoothedToolIds(prev => {
+        const next = new Set(prev)
+        if (smoothed) next.add(toolId)
+        else next.delete(toolId)
+        return next
+      })
+    } catch { /* ignore */ }
+  }, [])
+
+  const handleSmoothLevelChange = useCallback((toolId: string, level: number) => {
+    setSmoothLevels(prev => new Map(prev).set(toolId, level))
+    if (smoothLevelTimerRef.current) clearTimeout(smoothLevelTimerRef.current)
+    smoothLevelTimerRef.current = setTimeout(() => {
+      updateTool(toolId, { smooth_level: level }).catch(() => {})
+    }, 300)
   }, [])
 
   const handleAddTool = useCallback((tool: PlacedTool) => {
@@ -372,6 +397,10 @@ export default function BinPage() {
           gridY={config.grid_y}
           wallThickness={config.wall_thickness}
           onEditTool={(toolId) => router.push(`/tools/${toolId}`)}
+          smoothedToolIds={smoothedToolIds}
+          onToggleSmoothed={handleToggleSmoothed}
+          smoothLevels={smoothLevels}
+          onSmoothLevelChange={handleSmoothLevelChange}
         />
       </div>
 

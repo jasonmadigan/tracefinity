@@ -126,6 +126,8 @@ export interface Tool {
   points: Point[]
   finger_holes: FingerHole[]
   interior_rings?: Point[][]
+  smoothed: boolean
+  smooth_level: number
   source_session_id: string | null
   created_at: string | null
 }
@@ -137,6 +139,8 @@ export interface ToolSummary {
   point_count: number
   points: Point[]
   interior_rings?: Point[][]
+  smoothed: boolean
+  smooth_level: number
   thumbnail_url: string | null
 }
 

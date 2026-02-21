@@ -1,7 +1,25 @@
+import math
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.validation import make_valid
 
 from app.models.schemas import Polygon, Point
+
+
+def _chaikin_smooth(
+    pts: list[tuple[float, float]], iterations: int = 3
+) -> list[tuple[float, float]]:
+    """chaikin corner-cutting subdivision. stays within the control polygon."""
+    result = list(pts)
+    for _ in range(iterations):
+        new: list[tuple[float, float]] = []
+        n = len(result)
+        for i in range(n):
+            p0 = result[i]
+            p1 = result[(i + 1) % n]
+            new.append((0.75 * p0[0] + 0.25 * p1[0], 0.75 * p0[1] + 0.25 * p1[1]))
+            new.append((0.25 * p0[0] + 0.75 * p1[0], 0.25 * p0[1] + 0.75 * p1[1]))
+        result = new
+    return result
 
 
 class ScaledFingerHole:
@@ -107,6 +125,26 @@ class PolygonScaler:
             pass
 
         return polygon
+
+    def smooth(self, polygon: ScaledPolygon, level: float = 0.5) -> ScaledPolygon:
+        """simplify, chaikin subdivide, then clean near-collinear points.
+        level 0..1 controls simplification aggressiveness before subdivision."""
+        pts = polygon.points_mm
+        if len(pts) < 4:
+            return polygon
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        diag = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+        # level 0 = gentle (0.002 * diag), level 1 = moderate (0.008 * diag)
+        factor = 0.002 + level * (0.008 - 0.002)
+        epsilon = max(0.3, diag * factor)
+        simplified = self.simplify(polygon, tolerance_mm=epsilon)
+        smoothed_pts = _chaikin_smooth(simplified.points_mm)
+        smoothed_rings = [_chaikin_smooth(ring) for ring in simplified.interior_rings_mm]
+        # clean up dense chaikin output — remove near-collinear points that
+        # cause clipper2 chord artifacts, while keeping the smooth shape
+        result = ScaledPolygon(polygon.id, smoothed_pts, polygon.label, polygon.finger_holes, smoothed_rings)
+        return self.simplify(result, tolerance_mm=0.05)
 
     def compute_bounding_box(
         self, polygons: list[ScaledPolygon]

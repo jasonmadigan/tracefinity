@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { MousePointer2, Trash2, Magnet, Type, Pencil, Maximize2 } from 'lucide-react'
 import type { PlacedTool, TextLabel } from '@/types'
-import { polygonPathData } from '@/lib/svg'
+import { polygonPathData, smoothPathData, simplifyPolygon } from '@/lib/svg'
 
 interface Props {
   placedTools: PlacedTool[]
@@ -14,6 +14,10 @@ interface Props {
   gridY: number
   wallThickness: number
   onEditTool?: (toolId: string) => void
+  smoothedToolIds?: Set<string>
+  onToggleSmoothed?: (toolId: string, smoothed: boolean) => void
+  smoothLevels?: Map<string, number>
+  onSmoothLevelChange?: (toolId: string, level: number) => void
 }
 
 const GRID_UNIT = 42
@@ -43,6 +47,10 @@ export function BinEditor({
   gridY,
   wallThickness,
   onEditTool,
+  smoothedToolIds,
+  onToggleSmoothed,
+  smoothLevels,
+  onSmoothLevelChange,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [selection, setSelection] = useState<Selection>(null)
@@ -488,9 +496,37 @@ export function BinEditor({
           </button>
         </div>
 
-        {selection?.type === 'tool' && (
+        {selection?.type === 'tool' && selectedTool && (
           <div className="ml-auto flex items-center gap-2">
-            {onEditTool && selectedTool && (
+            {onToggleSmoothed && (
+              <div className="flex items-center bg-elevated rounded overflow-hidden border border-border-subtle text-xs">
+                <button
+                  onClick={() => onToggleSmoothed(selectedTool.tool_id, false)}
+                  className={`px-2 py-1 transition-colors ${!smoothedToolIds?.has(selectedTool.tool_id) ? 'bg-accent text-white' : 'text-text-muted hover:text-text-secondary'}`}
+                >
+                  Accurate
+                </button>
+                <button
+                  onClick={() => onToggleSmoothed(selectedTool.tool_id, true)}
+                  className={`px-2 py-1 transition-colors ${smoothedToolIds?.has(selectedTool.tool_id) ? 'bg-accent text-white' : 'text-text-muted hover:text-text-secondary'}`}
+                >
+                  Smooth
+                </button>
+              </div>
+            )}
+            {smoothedToolIds?.has(selectedTool.tool_id) && onSmoothLevelChange && (
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={smoothLevels?.get(selectedTool.tool_id) ?? 0.5}
+                onChange={e => onSmoothLevelChange(selectedTool.tool_id, parseFloat(e.target.value))}
+                className="w-20 h-1 accent-accent"
+                title={`Smooth level: ${Math.round((smoothLevels?.get(selectedTool.tool_id) ?? 0.5) * 100)}%`}
+              />
+            )}
+            {onEditTool && (
               <button
                 onClick={() => onEditTool(selectedTool.tool_id)}
                 className="px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent-muted rounded-lg border border-accent/30 flex items-center gap-1"
@@ -609,7 +645,17 @@ export function BinEditor({
           })()}
 
           {placedTools.map(tool => {
-            const pathData = polygonPathData(tool.points, tool.interior_rings, DISPLAY_SCALE)
+            let pathData: string
+            if (smoothedToolIds?.has(tool.tool_id)) {
+              let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity
+              for (const p of tool.points) { mnX = Math.min(mnX, p.x); mnY = Math.min(mnY, p.y); mxX = Math.max(mxX, p.x); mxY = Math.max(mxY, p.y) }
+              const level = smoothLevels?.get(tool.tool_id) ?? 0.5
+              const factor = 0.002 + level * (0.008 - 0.002)
+              const eps = Math.max(0.3, Math.hypot(mxX - mnX, mxY - mnY) * factor)
+              pathData = smoothPathData(simplifyPolygon(tool.points, eps), tool.interior_rings, DISPLAY_SCALE)
+            } else {
+              pathData = polygonPathData(tool.points, tool.interior_rings, DISPLAY_SCALE)
+            }
             const isSelected = selection?.type === 'tool' && selection.toolId === tool.id
 
             return (
