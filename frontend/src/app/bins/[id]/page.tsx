@@ -11,8 +11,8 @@ import { getSettings } from '@/lib/settings'
 import type { BinConfig, BinData, PlacedTool, TextLabel } from '@/types'
 import { Download, Loader2, Package, ArrowLeft } from 'lucide-react'
 import { Alert } from '@/components/Alert'
-
-const GRID_UNIT = 42
+import { useDebouncedSave } from '@/hooks/useDebouncedSave'
+import { GRID_UNIT } from '@/lib/constants'
 
 function defaultConfig(): BinConfig {
   return {
@@ -53,7 +53,6 @@ export default function BinPage() {
   const generatingRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
   const doGenerateRef = useRef<() => void>(() => {})
-  const initialLoadRef = useRef(true)
   const [smoothedToolIds, setSmoothedToolIds] = useState<Set<string>>(new Set())
   const [smoothLevels, setSmoothLevels] = useState<Map<string, number>>(new Map())
   const smoothLevelTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -73,10 +72,7 @@ export default function BinPage() {
         setError('Bin not found')
       } finally {
         setLoading(false)
-        setTimeout(() => {
-          initialLoadRef.current = false
-          doGenerateRef.current()
-        }, 100)
+        setTimeout(() => doGenerateRef.current(), 100)
       }
     }
     load()
@@ -129,37 +125,20 @@ export default function BinPage() {
     doGenerateRef.current = doGenerate
   }, [doGenerate])
 
-  // save on any change (short debounce to batch drag events, flush on unload)
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const pendingSaveRef = useRef<(() => void) | null>(null)
-
-  useEffect(() => {
-    if (!binData || initialLoadRef.current) return
-    const doSave = () => {
+  useDebouncedSave(
+    () => {
+      if (!binData) return
       updateBin(binId, {
         name: name || undefined,
         bin_config: config,
         placed_tools: placedTools,
         text_labels: textLabels,
       }).catch(() => {})
-    }
-    pendingSaveRef.current = doSave
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    saveTimeoutRef.current = setTimeout(() => {
-      pendingSaveRef.current = null
-      doSave()
-    }, 150)
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    }
-  }, [binData, binId, name, config, placedTools, textLabels])
-
-  // flush pending save on page unload
-  useEffect(() => {
-    const flush = () => { pendingSaveRef.current?.() }
-    window.addEventListener('beforeunload', flush)
-    return () => window.removeEventListener('beforeunload', flush)
-  }, [])
+    },
+    [binData, binId, name, config, placedTools, textLabels],
+    150,
+    { skipInitial: true }
+  )
 
   // abort in-flight STL generation on unmount
   useEffect(() => {
@@ -168,7 +147,7 @@ export default function BinPage() {
 
   // debounce only the STL generation
   useEffect(() => {
-    if (!binData || initialLoadRef.current) return
+    if (!binData) return
     if (generateTimeoutRef.current) clearTimeout(generateTimeoutRef.current)
     generateTimeoutRef.current = setTimeout(() => {
       doGenerate()

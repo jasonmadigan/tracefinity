@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Point, Polygon } from '@/types'
 import { Undo2, Redo2, Trash2, Plus, Minus, Move, MousePointer2 } from 'lucide-react'
 import { polygonPathData } from '@/lib/svg'
+import { useHistory } from '@/hooks/useHistory'
 
 interface Props {
   imageUrl: string
@@ -11,8 +12,6 @@ interface Props {
   onPolygonsChange: (polygons: Polygon[]) => void
   editable?: boolean
 }
-
-const MAX_HISTORY = 50
 // base sizes for SVG UI elements, designed for ~800px viewBox width
 const BASE_VIEW_WIDTH = 800
 
@@ -37,71 +36,10 @@ export function PolygonEditor({
   const [editMode, setEditMode] = useState<EditMode>('select')
   const [dragging, setDragging] = useState<DragState>(null)
 
-  // undo/redo history
-  const [history, setHistory] = useState<Polygon[][]>([])
-  const [historyIndex, setHistoryIndex] = useState(-1)
-  const isUndoRedo = useRef(false)
-
-  // track changes for undo
-  const pushHistory = useCallback((newPolygons: Polygon[]) => {
-    if (isUndoRedo.current) {
-      isUndoRedo.current = false
-      return
-    }
-    setHistory(prev => {
-      const newHistory = prev.slice(0, historyIndex + 1)
-      newHistory.push(JSON.parse(JSON.stringify(newPolygons)))
-      if (newHistory.length > MAX_HISTORY) {
-        newHistory.shift()
-        return newHistory
-      }
-      return newHistory
-    })
-    setHistoryIndex(prev => Math.min(prev + 1, MAX_HISTORY - 1))
-  }, [historyIndex])
-
-  // initialise history with current state
-  useEffect(() => {
-    if (history.length === 0 && polygons.length > 0) {
-      setHistory([JSON.parse(JSON.stringify(polygons))])
-      setHistoryIndex(0)
-    }
-  }, [polygons, history.length])
-
-  const canUndo = historyIndex > 0
-  const canRedo = historyIndex < history.length - 1
-
-  const handleUndo = useCallback(() => {
-    if (!canUndo) return
-    isUndoRedo.current = true
-    const newIndex = historyIndex - 1
-    setHistoryIndex(newIndex)
-    onPolygonsChange(JSON.parse(JSON.stringify(history[newIndex])))
-  }, [canUndo, historyIndex, history, onPolygonsChange])
-
-  const handleRedo = useCallback(() => {
-    if (!canRedo) return
-    isUndoRedo.current = true
-    const newIndex = historyIndex + 1
-    setHistoryIndex(newIndex)
-    onPolygonsChange(JSON.parse(JSON.stringify(history[newIndex])))
-  }, [canRedo, historyIndex, history, onPolygonsChange])
-
-  // keyboard shortcuts
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
-        e.preventDefault()
-        if (e.shiftKey) {
-          handleRedo()
-        } else {
-          handleUndo()
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleUndo, handleRedo])
+  const { set: pushHistory, undo: handleUndo, redo: handleRedo, canUndo, canRedo } = useHistory<Polygon[]>(
+    polygons,
+    onPolygonsChange
+  )
 
   useEffect(() => {
     let cancelled = false

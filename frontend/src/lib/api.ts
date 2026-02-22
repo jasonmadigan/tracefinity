@@ -50,20 +50,19 @@ async function fetchApi<T>(
   return res.json()
 }
 
+async function fetchForm<T>(path: string, body: FormData): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, { method: 'POST', body })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'request failed' }))
+    throw new ApiError(err.detail || 'request failed', res.status)
+  }
+  return res.json()
+}
+
 export async function uploadImage(file: File): Promise<UploadResponse> {
   const formData = new FormData()
   formData.append('image', file)
-
-  const res = await fetch(`${API_URL}/api/upload`, {
-    method: 'POST',
-    body: formData,
-  })
-
-  if (!res.ok) {
-    throw new Error('upload failed')
-  }
-
-  return res.json()
+  return fetchForm('/api/upload', formData)
 }
 
 export async function setCorners(
@@ -161,18 +160,7 @@ export async function traceFromMask(
 ): Promise<TraceResponse> {
   const formData = new FormData()
   formData.append('mask', maskFile)
-
-  const res = await fetch(`${API_URL}/api/sessions/${sessionId}/trace-mask`, {
-    method: 'POST',
-    body: formData,
-  })
-
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: 'upload failed' }))
-    throw new Error(error.detail || 'upload failed')
-  }
-
-  return res.json()
+  return fetchForm(`/api/sessions/${sessionId}/trace-mask`, formData)
 }
 
 // backwards compat

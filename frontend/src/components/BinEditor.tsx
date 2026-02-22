@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { MousePointer2, Trash2, Magnet, Type, Pencil, Maximize2 } from 'lucide-react'
 import type { PlacedTool, TextLabel } from '@/types'
-import { polygonPathData, smoothPathData, simplifyPolygon } from '@/lib/svg'
+import { snapToGrid as snapToGridUtil } from '@/lib/svg'
+import { GRID_UNIT, DISPLAY_SCALE, SNAP_GRID } from '@/lib/constants'
+import { BinEditorToolbar } from '@/components/BinEditorToolbar'
+import { BinEditorCanvas } from '@/components/BinEditorCanvas'
 
 interface Props {
   placedTools: PlacedTool[]
@@ -19,10 +21,6 @@ interface Props {
   smoothLevels?: Map<string, number>
   onSmoothLevelChange?: (toolId: string, level: number) => void
 }
-
-const GRID_UNIT = 42
-const DISPLAY_SCALE = 8
-const SNAP_GRID = 5
 
 type Tool = 'select' | 'text'
 
@@ -78,7 +76,6 @@ export function BinEditor({
   const displayWidth = binWidthMm * DISPLAY_SCALE
   const displayHeight = binHeightMm * DISPLAY_SCALE
 
-  // handle sizes: scale gently with bin size but stay bounded
   const viewBoxShort = Math.min(displayWidth, displayHeight) + 30
   const handleR = Math.max(14, Math.min(28, viewBoxShort * 0.04))
   const handleOffset = handleR * 2.5
@@ -135,7 +132,7 @@ export function BinEditor({
 
   const snapToGrid = useCallback((v: number) => {
     if (!snapEnabled) return v
-    return Math.round(v / SNAP_GRID) * SNAP_GRID
+    return snapToGridUtil(v, SNAP_GRID)
   }, [snapEnabled])
 
   const handleToolMouseDown = (toolId: string) => (e: React.MouseEvent) => {
@@ -225,7 +222,6 @@ export function BinEditor({
         l.id === editingLabelId ? { ...l, text: trimmed } : l
       ))
     } else {
-      // empty text = delete the label
       onTextLabelsChange(textLabels.filter(l => l.id !== editingLabelId))
       setSelection(null)
     }
@@ -240,7 +236,6 @@ export function BinEditor({
     }
   }, [editingLabelId])
 
-  // ray-casting point-in-polygon
   const pointInRing = useCallback((px: number, py: number, ring: { x: number; y: number }[]) => {
     let inside = false
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -253,11 +248,9 @@ export function BinEditor({
     return inside
   }, [])
 
-  // true if point is inside a tool cutout (outer polygon minus interior rings)
   const isInsideCutout = useCallback((px: number, py: number) => {
     for (const tool of toolsRef.current) {
       if (!pointInRing(px, py, tool.points)) continue
-      // inside outer polygon; check if rescued by an interior ring (raised island)
       let inIsland = false
       for (const ring of (tool.interior_rings ?? [])) {
         if (pointInRing(px, py, ring)) { inIsland = true; break }
@@ -446,480 +439,74 @@ export function BinEditor({
     }))
   }
 
+  const handleEditingLabelKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') commitEditingLabel()
+    if (e.key === 'Escape') { setEditingLabelId(null); setEditingText('') }
+  }
+
+  const handlePendingLabelKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') commitPendingLabel()
+    if (e.key === 'Escape') { setPendingLabel(null); setPendingText('') }
+  }
+
   return (
     <div className="h-full flex flex-col gap-3">
-      {/* toolbar */}
-      <div className="flex items-center gap-3 flex-shrink-0">
-        {/* mode selector */}
-        <div className="flex bg-elevated rounded-lg p-0.5 border border-border">
-          <button
-            onClick={() => setActiveTool('select')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors ${
-              activeTool === 'select' ? 'bg-accent-muted text-accent' : 'hover:bg-border/50 text-text-secondary'
-            }`}
-            title="Select & move tools"
-          >
-            <MousePointer2 className="w-4 h-4" />
-            Select
-          </button>
-          <button
-            onClick={() => setActiveTool('text')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors ${
-              activeTool === 'text' ? 'bg-accent-muted text-accent' : 'hover:bg-border/50 text-text-secondary'
-            }`}
-            title="Place text label"
-          >
-            <Type className="w-4 h-4" />
-            Text
-          </button>
-        </div>
-
-        {/* utility */}
-        <div className="flex items-center gap-1 text-text-muted">
-          <button
-            onClick={() => setSnapEnabled(!snapEnabled)}
-            className={`px-2 py-1.5 rounded text-xs flex items-center gap-1 transition-colors ${
-              snapEnabled ? 'text-accent' : 'hover:bg-border/50 hover:text-text-secondary'
-            }`}
-            title={`Snap to ${SNAP_GRID}mm grid${snapEnabled ? ' (on)' : ' (off)'}`}
-          >
-            <Magnet className="w-3.5 h-3.5" />
-            Snap
-          </button>
-          <button
-            onClick={handleRecenter}
-            className="px-2 py-1.5 rounded text-xs flex items-center gap-1 hover:bg-border/50 hover:text-text-secondary transition-colors"
-            title="Recenter view"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-            Recenter
-          </button>
-        </div>
-
-        {selection?.type === 'tool' && selectedTool && (
-          <div className="ml-auto flex items-center gap-2">
-            {onToggleSmoothed && (
-              <div className="flex items-center bg-elevated rounded overflow-hidden border border-border-subtle text-xs">
-                <button
-                  onClick={() => onToggleSmoothed(selectedTool.tool_id, false)}
-                  className={`px-2 py-1 transition-colors ${!smoothedToolIds?.has(selectedTool.tool_id) ? 'bg-accent text-white' : 'text-text-muted hover:text-text-secondary'}`}
-                >
-                  Accurate
-                </button>
-                <button
-                  onClick={() => onToggleSmoothed(selectedTool.tool_id, true)}
-                  className={`px-2 py-1 transition-colors ${smoothedToolIds?.has(selectedTool.tool_id) ? 'bg-accent text-white' : 'text-text-muted hover:text-text-secondary'}`}
-                >
-                  Smooth
-                </button>
-              </div>
-            )}
-            {smoothedToolIds?.has(selectedTool.tool_id) && onSmoothLevelChange && (
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={smoothLevels?.get(selectedTool.tool_id) ?? 0.5}
-                onChange={e => onSmoothLevelChange(selectedTool.tool_id, parseFloat(e.target.value))}
-                className="w-20 h-1 accent-accent"
-                title={`Smooth level: ${Math.round((smoothLevels?.get(selectedTool.tool_id) ?? 0.5) * 100)}%`}
-              />
-            )}
-            {onEditTool && (
-              <button
-                onClick={() => onEditTool(selectedTool.tool_id)}
-                className="px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent-muted rounded-lg border border-accent/30 flex items-center gap-1"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                Edit Tool
-              </button>
-            )}
-            <button
-              onClick={handleDeleteTool}
-              className="px-3 py-1.5 text-xs font-medium text-white bg-red-700 hover:bg-red-600 rounded-lg flex items-center gap-1 shadow-sm"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Remove
-            </button>
-          </div>
-        )}
-        {selection?.type === 'label' && (
-          <button
-            onClick={handleDeleteLabel}
-            className="ml-auto px-3 py-1.5 text-xs font-medium text-white bg-red-700 hover:bg-red-600 rounded-lg flex items-center gap-1 shadow-sm"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Delete
-          </button>
-        )}
-      </div>
-
-      {selectedLabel && (
-        <div className="text-sm text-text-secondary bg-elevated rounded border border-border px-3 py-2 flex-shrink-0 flex items-center gap-3 flex-wrap">
-          <label className="flex items-center gap-1">
-            Text
-            <input
-              type="text"
-              value={selectedLabel.text}
-              onChange={e => updateSelectedLabel({ text: e.target.value })}
-              className="w-28 px-1 py-0.5 border border-border-subtle rounded bg-surface text-text-primary"
-            />
-          </label>
-          <label className="flex items-center gap-1">
-            Size
-            <input
-              type="number"
-              value={selectedLabel.font_size}
-              onChange={e => updateSelectedLabel({ font_size: Math.max(1, Math.min(50, parseFloat(e.target.value) || 1)) })}
-              className="w-14 px-1 py-0.5 border border-border-subtle rounded bg-surface text-text-primary"
-              min={1} max={50} step={0.5}
-            />
-            mm
-          </label>
-          <label className="flex items-center gap-1">
-            Depth
-            <input
-              type="number"
-              value={selectedLabel.depth}
-              onChange={e => updateSelectedLabel({ depth: Math.max(0.1, Math.min(5, parseFloat(e.target.value) || 0.1)) })}
-              className="w-14 px-1 py-0.5 border border-border-subtle rounded bg-surface text-text-primary"
-              min={0.1} max={5} step={0.1}
-            />
-            mm
-          </label>
-          <button
-            onClick={() => updateSelectedLabel({ emboss: !selectedLabel.emboss })}
-            className={`px-2 py-0.5 rounded border text-xs font-medium ${
-              selectedLabel.emboss
-                ? 'bg-teal-900/30 border-teal-700 text-teal-400'
-                : 'bg-orange-900/30 border-orange-700 text-orange-400'
-            }`}
-          >
-            {selectedLabel.emboss ? 'Embossed' : 'Recessed'}
-          </button>
-        </div>
-      )}
-
-      {/* SVG area */}
-      <div className="flex-1 min-h-0 bg-inset rounded-lg p-4 flex items-center justify-center">
-        <svg
-          ref={svgRef}
-          viewBox={`-10 -10 ${displayWidth + 70} ${displayHeight + 30}`}
-          preserveAspectRatio="xMidYMid meet"
-          className={`rounded max-w-full max-h-full ${activeTool === 'select' ? 'cursor-default' : 'cursor-crosshair'}`}
-          style={{ overflow: 'visible' }}
-          onClick={handleBackgroundClick}
-        >
-          <rect x="0" y="0" width={displayWidth} height={displayHeight} fill="rgb(30, 41, 59)" rx="4" />
-          {Array.from({ length: gridX + 1 }).map((_, i) => (
-            <line
-              key={`v${i}`}
-              x1={i * GRID_UNIT * DISPLAY_SCALE} y1={0}
-              x2={i * GRID_UNIT * DISPLAY_SCALE} y2={displayHeight}
-              stroke="rgba(255,255,255,0.1)" strokeWidth={1}
-              strokeDasharray={i === 0 || i === gridX ? undefined : '4,4'}
-            />
-          ))}
-          {Array.from({ length: gridY + 1 }).map((_, i) => (
-            <line
-              key={`h${i}`}
-              x1={0} y1={i * GRID_UNIT * DISPLAY_SCALE}
-              x2={displayWidth} y2={i * GRID_UNIT * DISPLAY_SCALE}
-              stroke="rgba(255,255,255,0.1)" strokeWidth={1}
-              strokeDasharray={i === 0 || i === gridY ? undefined : '4,4'}
-            />
-          ))}
-
-          {/* wall inset boundary */}
-          {(() => {
-            const inset = (wallThickness + 0.25) * DISPLAY_SCALE
-            return (
-              <rect
-                x={inset} y={inset}
-                width={displayWidth - 2 * inset} height={displayHeight - 2 * inset}
-                fill="none" stroke="rgba(255,255,255,0.15)"
-                strokeWidth={1} strokeDasharray="6,4"
-              />
-            )
-          })()}
-
-          {placedTools.map(tool => {
-            let pathData: string
-            if (smoothedToolIds?.has(tool.tool_id)) {
-              let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity
-              for (const p of tool.points) { mnX = Math.min(mnX, p.x); mnY = Math.min(mnY, p.y); mxX = Math.max(mxX, p.x); mxY = Math.max(mxY, p.y) }
-              const level = smoothLevels?.get(tool.tool_id) ?? 0.5
-              const factor = 0.002 + level * (0.008 - 0.002)
-              const eps = Math.max(0.3, Math.hypot(mxX - mnX, mxY - mnY) * factor)
-              pathData = smoothPathData(simplifyPolygon(tool.points, eps), tool.interior_rings, DISPLAY_SCALE)
-            } else {
-              pathData = polygonPathData(tool.points, tool.interior_rings, DISPLAY_SCALE)
-            }
-            const isSelected = selection?.type === 'tool' && selection.toolId === tool.id
-
-            return (
-              <g key={tool.id} onClick={stopClickUnlessText}>
-                <path
-                  d={pathData}
-                  fillRule="evenodd"
-                  fill={isSelected ? 'rgb(51, 65, 85)' : 'rgb(71, 85, 105)'}
-                  stroke={isSelected ? 'rgb(148, 163, 184)' : 'rgb(100, 116, 139)'}
-                  strokeWidth={handleStroke}
-                  className={activeTool === 'text' ? 'cursor-crosshair' : 'cursor-move'}
-                  onMouseDown={handleToolMouseDown(tool.id)}
-                  onClick={stopClickUnlessText}
-                />
-
-                {/* read-only cutout display */}
-                {tool.finger_holes.map(fh => {
-                  const x = fh.x * DISPLAY_SCALE
-                  const y = fh.y * DISPLAY_SCALE
-                  const r = fh.radius * DISPLAY_SCALE
-                  const shape = fh.shape || 'circle'
-                  const rotation = fh.rotation || 0
-                  const w = shape === 'rectangle' && fh.width ? fh.width * DISPLAY_SCALE : r * 2
-                  const h = shape === 'rectangle' && fh.height ? fh.height * DISPLAY_SCALE : r * 2
-
-                  return (
-                    <g key={fh.id} transform={rotation !== 0 ? `rotate(${rotation} ${x} ${y})` : undefined}>
-                      {shape === 'circle' && (
-                        <circle
-                          cx={x} cy={y} r={r}
-                          fill="rgb(51, 65, 85)" stroke="rgb(30, 41, 59)" strokeWidth={1}
-                          className="pointer-events-none"
-                        />
-                      )}
-                      {(shape === 'square' || shape === 'rectangle') && (
-                        <rect
-                          x={x - w / 2} y={y - h / 2} width={w} height={h}
-                          fill="rgb(51, 65, 85)" stroke="rgb(30, 41, 59)" strokeWidth={1}
-                          className="pointer-events-none"
-                        />
-                      )}
-                    </g>
-                  )
-                })}
-              </g>
-            )
-          })}
-
-          {/* text labels */}
-          {textLabels.map(label => {
-            const x = label.x * DISPLAY_SCALE
-            const y = label.y * DISPLAY_SCALE
-            const fontSize = label.font_size * DISPLAY_SCALE
-            const isSelected = selection?.type === 'label' && selection.labelId === label.id
-            const isEditing = editingLabelId === label.id
-            // expanded hit area: at least handleR*2 tall, and wider than text
-            const hitH = Math.max(fontSize * 1.4, handleR * 2)
-            const hitW = Math.max(fontSize * label.text.length * 0.7, handleR * 4)
-
-            return (
-              <g key={label.id} transform={label.rotation !== 0 ? `rotate(${label.rotation} ${x} ${y})` : undefined}>
-                {/* invisible expanded hit area */}
-                <rect
-                  x={x - hitW / 2} y={y - hitH / 2}
-                  width={hitW} height={hitH}
-                  fill="transparent"
-                  className="cursor-move"
-                  onMouseDown={handleLabelMouseDown(label.id)}
-                  onDoubleClick={handleLabelDoubleClick(label.id)}
-                  onClick={stopClick}
-                />
-                {!isEditing && (
-                  <text
-                    x={x} y={y}
-                    textAnchor="middle" dominantBaseline="central"
-                    fill={isSelected ? 'rgb(13, 148, 136)' : 'rgb(20, 184, 166)'}
-                    stroke={isSelected ? 'rgb(13, 148, 136)' : 'none'}
-                    strokeWidth={isSelected ? 0.5 : 0}
-                    fontSize={fontSize} fontWeight="600" fontFamily="Arial, sans-serif"
-                    className="pointer-events-none"
-                  >
-                    {label.text}
-                  </text>
-                )}
-              </g>
-            )
-          })}
-
-          {/* selection handles: bounding box with corner rotation zones */}
-          {selection?.type === 'tool' && (() => {
-            const tool = placedTools.find(t => t.id === selection.toolId)
-            if (!tool) return null
-            const pad = handleR * 0.4
-            let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity
-            for (const p of tool.points) {
-              bMinX = Math.min(bMinX, p.x); bMinY = Math.min(bMinY, p.y)
-              bMaxX = Math.max(bMaxX, p.x); bMaxY = Math.max(bMaxY, p.y)
-            }
-            const dMinX = bMinX * DISPLAY_SCALE - pad
-            const dMinY = bMinY * DISPLAY_SCALE - pad
-            const dMaxX = bMaxX * DISPLAY_SCALE + pad
-            const dMaxY = bMaxY * DISPLAY_SCALE + pad
-            const cornerSize = handleR * 2
-            const cornerLen = handleR * 0.7
-            const corners = [
-              { x: dMinX, y: dMinY },
-              { x: dMaxX, y: dMinY },
-              { x: dMaxX, y: dMaxY },
-              { x: dMinX, y: dMaxY },
-            ]
-            return (
-              <g>
-                <rect
-                  x={dMinX} y={dMinY}
-                  width={dMaxX - dMinX} height={dMaxY - dMinY}
-                  fill="none" stroke="rgba(90, 180, 222, 0.3)" strokeWidth={handleStroke}
-                  strokeDasharray={`${handleR * 0.4},${handleR * 0.25}`}
-                  className="pointer-events-none"
-                />
-                {corners.map((c, i) => {
-                  const dx = i === 0 || i === 3 ? 1 : -1
-                  const dy = i < 2 ? 1 : -1
-                  const arcR = cornerLen
-                  return (
-                    <g key={i}>
-                      <path
-                        d={`M${c.x},${c.y + dy * arcR} A${arcR},${arcR} 0 0 ${dy * dx > 0 ? 1 : 0} ${c.x + dx * arcR},${c.y}`}
-                        fill="none" stroke="rgba(90, 180, 222, 0.5)" strokeWidth={handleStroke}
-                        className="pointer-events-none"
-                      />
-                      <rect
-                        x={c.x - cornerSize / 2} y={c.y - cornerSize / 2}
-                        width={cornerSize} height={cornerSize}
-                        fill="transparent"
-                        className="cursor-rotate"
-                        onMouseDown={handleRotateMouseDown(tool.id)}
-                        onClick={stopClick}
-                      />
-                    </g>
-                  )
-                })}
-              </g>
-            )
-          })()}
-          {selection?.type === 'label' && !editingLabelId && (() => {
-            const label = textLabels.find(l => l.id === selection.labelId)
-            if (!label) return null
-            const x = label.x * DISPLAY_SCALE
-            const y = label.y * DISPLAY_SCALE
-            const fontSize = label.font_size * DISPLAY_SCALE
-            const hitH = Math.max(fontSize * 1.4, handleR * 2)
-            const hitW = Math.max(fontSize * label.text.length * 0.7, handleR * 4)
-            const pad = handleR * 0.3
-            const bMinX = x - hitW / 2 - pad
-            const bMinY = y - hitH / 2 - pad
-            const bMaxX = x + hitW / 2 + pad
-            const bMaxY = y + hitH / 2 + pad
-            const cornerSize = handleR * 2
-            const cornerLen = handleR * 0.7
-            const corners = [
-              { x: bMinX, y: bMinY },
-              { x: bMaxX, y: bMinY },
-              { x: bMaxX, y: bMaxY },
-              { x: bMinX, y: bMaxY },
-            ]
-            return (
-              <g transform={label.rotation !== 0 ? `rotate(${label.rotation} ${x} ${y})` : undefined}>
-                <rect
-                  x={bMinX} y={bMinY}
-                  width={bMaxX - bMinX} height={bMaxY - bMinY}
-                  fill="none" stroke="rgba(13, 148, 136, 0.4)" strokeWidth={handleStroke}
-                  strokeDasharray={`${handleR * 0.4},${handleR * 0.25}`}
-                  className="pointer-events-none"
-                />
-                {corners.map((c, i) => {
-                  const dx = i === 0 || i === 3 ? 1 : -1
-                  const dy = i < 2 ? 1 : -1
-                  const arcR = cornerLen
-                  return (
-                    <g key={i}>
-                      <path
-                        d={`M${c.x},${c.y + dy * arcR} A${arcR},${arcR} 0 0 ${dy * dx > 0 ? 1 : 0} ${c.x + dx * arcR},${c.y}`}
-                        fill="none" stroke="rgba(13, 148, 136, 0.5)" strokeWidth={handleStroke}
-                        className="pointer-events-none"
-                      />
-                      <rect
-                        x={c.x - cornerSize / 2} y={c.y - cornerSize / 2}
-                        width={cornerSize} height={cornerSize}
-                        fill="transparent"
-                        className="cursor-rotate"
-                        onMouseDown={handleLabelRotateMouseDown(label.id)}
-                        onClick={stopClick}
-                      />
-                    </g>
-                  )
-                })}
-              </g>
-            )
-          })()}
-
-          {editingLabelId && (() => {
-            const label = textLabels.find(l => l.id === editingLabelId)
-            if (!label) return null
-            const x = label.x * DISPLAY_SCALE
-            const y = label.y * DISPLAY_SCALE
-            return (
-              <foreignObject
-                x={x - 120} y={y - 20}
-                width={240} height={40}
-                transform={label.rotation !== 0 ? `rotate(${label.rotation} ${x} ${y})` : undefined}
-              >
-                <input
-                  ref={editInputRef}
-                  type="text"
-                  value={editingText}
-                  onChange={e => setEditingText(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') commitEditingLabel()
-                    if (e.key === 'Escape') { setEditingLabelId(null); setEditingText('') }
-                  }}
-                  onBlur={commitEditingLabel}
-                  onClick={stopClick}
-                  className="w-full bg-elevated border-2 border-teal-500 rounded text-text-primary outline-none"
-                  style={{ fontSize: '20px', padding: '4px 8px', height: '100%', boxSizing: 'border-box', textAlign: 'center' }}
-                />
-              </foreignObject>
-            )
-          })()}
-
-          {pendingLabel && (
-            <foreignObject
-              x={pendingLabel.x * DISPLAY_SCALE - 120}
-              y={pendingLabel.y * DISPLAY_SCALE - 20}
-              width={240} height={40}
-            >
-              <input
-                ref={pendingInputRef}
-                type="text"
-                value={pendingText}
-                onChange={e => setPendingText(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') commitPendingLabel()
-                  if (e.key === 'Escape') { setPendingLabel(null); setPendingText('') }
-                }}
-                onBlur={commitPendingLabel}
-                onClick={stopClick}
-                placeholder="Label text..."
-                className="w-full bg-elevated border-2 border-teal-500 rounded text-text-primary outline-none"
-                style={{ fontSize: '20px', padding: '4px 8px', height: '100%', boxSizing: 'border-box' }}
-              />
-            </foreignObject>
-          )}
-        </svg>
-      </div>
-
-      {/* bottom bar */}
-      <div className="flex items-center justify-between text-xs flex-shrink-0">
-        <span className="text-text-muted">{gridX}x{gridY} Grid ({binWidthMm}x{binHeightMm}mm)</span>
-        <span className="text-text-muted">
-          {activeTool === 'select' && 'Drag to move, double-click text to edit'}
-          {activeTool === 'text' && 'Click to place, double-click to edit'}
-        </span>
-        <span />
-      </div>
+      <BinEditorToolbar
+        activeTool={activeTool}
+        setActiveTool={setActiveTool}
+        snapEnabled={snapEnabled}
+        setSnapEnabled={setSnapEnabled}
+        handleRecenter={handleRecenter}
+        selectedTool={selectedTool ?? null}
+        selectedLabel={selectedLabel ?? null}
+        onEditTool={onEditTool}
+        onRemoveTool={handleDeleteTool}
+        onRemoveLabel={handleDeleteLabel}
+        smoothedToolIds={smoothedToolIds}
+        smoothLevels={smoothLevels}
+        onToggleSmoothed={onToggleSmoothed}
+        onSmoothLevelChange={onSmoothLevelChange}
+        onUpdateLabel={updateSelectedLabel}
+      />
+      <BinEditorCanvas
+        svgRef={svgRef}
+        displayWidth={displayWidth}
+        displayHeight={displayHeight}
+        gridX={gridX}
+        gridY={gridY}
+        wallThickness={wallThickness}
+        placedTools={placedTools}
+        selection={selection}
+        textLabels={textLabels}
+        editingLabelId={editingLabelId}
+        editingText={editingText}
+        pendingLabel={pendingLabel}
+        pendingLabelText={pendingText}
+        smoothedToolIds={smoothedToolIds}
+        smoothLevels={smoothLevels}
+        activeTool={activeTool}
+        binWidthMm={binWidthMm}
+        binHeightMm={binHeightMm}
+        handleR={handleR}
+        handleStroke={handleStroke}
+        handleOffset={handleOffset}
+        pendingInputRef={pendingInputRef}
+        editInputRef={editInputRef}
+        handleToolMouseDown={handleToolMouseDown}
+        handleRotateMouseDown={handleRotateMouseDown}
+        handleLabelMouseDown={handleLabelMouseDown}
+        handleLabelRotateMouseDown={handleLabelRotateMouseDown}
+        handleLabelDoubleClick={handleLabelDoubleClick}
+        handleBackgroundClick={handleBackgroundClick}
+        stopClick={stopClick}
+        stopClickUnlessText={stopClickUnlessText}
+        onEditingTextChange={setEditingText}
+        onEditingLabelKeyDown={handleEditingLabelKeyDown}
+        onEditingLabelBlur={commitEditingLabel}
+        onPendingTextChange={setPendingText}
+        onPendingLabelKeyDown={handlePendingLabelKeyDown}
+        onPendingLabelBlur={commitPendingLabel}
+      />
     </div>
   )
 }

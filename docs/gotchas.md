@@ -29,11 +29,14 @@ Boolean operations (add, subtract) are single-threaded in OCCT. More cores don't
 
 ## Frontend patterns
 
+- Shared constants (`DISPLAY_SCALE`, `SNAP_GRID`, `GRID_UNIT`, etc.) live in `lib/constants.ts`
 - `DISPLAY_SCALE = 8` converts mm to SVG units in the bin editor
 - Config is spread into the API request body: `{ ...config, polygons }` in `generateStl`
 - Text labels live on BinConfig (not Polygon) since they're free-placed
 - PolygonEditor uses refs (`polygonsRef`, `onPolygonsChangeRef`) to avoid stale closures during drag -- do not add `polygons` or `onPolygonsChange` to the `handleMouseMove` dependency array
-- Polygon saves are debounced (300ms) during drag with a `beforeunload` flush
+- Auto-save uses the `useDebouncedSave` hook (debounce + `beforeunload` flush). Pass `skipInitial: true` to avoid saving on first load.
+- Undo/redo uses the `useHistory` hook (deep-clone, Cmd+Z handling). The `set()` method pushes to history; `undo()`/`redo()` call the `onChange` callback.
+- ToolEditor and BinEditor are split into orchestrator + toolbar + canvas sub-components. `CutoutOverlay` renders finger holes in both.
 
 ## Gemini mask quirks
 

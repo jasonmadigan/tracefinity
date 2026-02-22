@@ -1,6 +1,10 @@
+import hashlib
+import json
 import logging
+import math
 import os
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -43,6 +47,7 @@ from app.models.schemas import (
     BinUpdateRequest,
     CreateBinRequest,
 )
+from app.constants import GF_GRID
 from app.services.image_processor import ImageProcessor
 from app.services.ai_tracer import AITracer
 from app.services.polygon_scaler import PolygonScaler, ScaledPolygon, ScaledFingerHole
@@ -50,6 +55,8 @@ from app.services.stl_generator_manifold import ManifoldSTLGenerator
 from app.services.session_store import SessionStore
 from app.services.tool_store import ToolStore
 from app.services.bin_store import BinStore
+from app.services.bin_service import sync_placed_tools
+from app.services.image_service import generate_tool_thumbnail
 router = APIRouter()
 
 # register heif/heic support with pillow
@@ -109,6 +116,81 @@ def _abs(rel_path: str | None) -> str | None:
     if not rel_path:
         return None
     return str(settings.storage_path / rel_path)
+
+
+def _translate_points(points: list[Point], dx: float, dy: float) -> list[Point]:
+    return [Point(x=p.x + dx, y=p.y + dy) for p in points]
+
+
+def _translate_finger_holes(holes: list[FingerHole], dx: float, dy: float) -> list[FingerHole]:
+    return [
+        FingerHole(
+            id=fh.id, x=fh.x + dx, y=fh.y + dy,
+            radius=fh.radius, width=fh.width, height=fh.height,
+            rotation=fh.rotation, shape=fh.shape,
+        )
+        for fh in holes
+    ]
+
+
+def _run_generate(
+    scaled: list[ScaledPolygon],
+    gen_req: GenerateRequest,
+    entity_id: str,
+    user_path: Path,
+    input_hash: str,
+    user_id: str,
+) -> GenerateResponse:
+    """shared STL generation with caching, splitting, and zipping"""
+    output_path = user_path / "outputs" / f"{entity_id}.stl"
+    hash_path = user_path / "outputs" / f"{entity_id}.hash"
+    threemf_path = user_path / "outputs" / f"{entity_id}.3mf"
+    zip_path = user_path / "outputs" / f"{entity_id}_parts.zip"
+
+    if output_path.exists() and hash_path.exists() and hash_path.read_text() == input_hash:
+        part_paths = sorted(user_path.glob(f"outputs/{entity_id}_part*.stl"))
+        stl_urls = [f"/storage/{user_id}/outputs/{p.name}" for p in part_paths]
+        return GenerateResponse(
+            stl_url=f"/storage/{user_id}/outputs/{entity_id}.stl",
+            stl_urls=stl_urls,
+            threemf_url=f"/storage/{user_id}/outputs/{entity_id}.3mf" if threemf_path.exists() else None,
+            split_count=max(1, len(stl_urls)),
+            zip_url=f"/storage/{user_id}/outputs/{entity_id}_parts.zip" if zip_path.exists() else None,
+        )
+
+    threemf_path.unlink(missing_ok=True)
+    for old in user_path.glob(f"outputs/{entity_id}_part*.stl"):
+        old.unlink(missing_ok=True)
+    zip_path.unlink(missing_ok=True)
+
+    bin_body, text_body = stl_generator.generate_bin(scaled, gen_req, str(output_path), str(threemf_path))
+
+    stl_urls: list[str] = []
+    zip_url = None
+    if gen_req.bed_size > 0:
+        output_dir = str(user_path / "outputs")
+        part_paths = stl_generator.split_bin(bin_body, text_body, gen_req, gen_req.bed_size, output_dir, entity_id)
+        if part_paths:
+            stl_urls = [f"/storage/{user_id}/outputs/{Path(p).name}" for p in part_paths]
+            part_bytes = [(Path(p).name, Path(p).read_bytes()) for p in part_paths]
+            with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zf:
+                for fname, data in part_bytes:
+                    zf.writestr(fname, data)
+            zip_url = f"/storage/{user_id}/outputs/{entity_id}_parts.zip"
+
+    hash_path.write_text(input_hash)
+
+    threemf_url = None
+    if threemf_path.exists():
+        threemf_url = f"/storage/{user_id}/outputs/{entity_id}.3mf"
+
+    return GenerateResponse(
+        stl_url=f"/storage/{user_id}/outputs/{entity_id}.stl",
+        stl_urls=stl_urls,
+        threemf_url=threemf_url,
+        split_count=max(1, len(stl_urls)),
+        zip_url=zip_url,
+    )
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -293,69 +375,21 @@ def generate_stl(request: Request, session_id: str, req: GenerateRequest, user_i
     if not polygons:
         raise HTTPException(status_code=400, detail="no polygons to generate from")
 
-    import hashlib, json
     input_hash = hashlib.md5(json.dumps(req.model_dump(), sort_keys=True, default=str).encode()).hexdigest()
-    hash_path = up / "outputs" / f"{session_id}.hash"
-    output_path = up / "outputs" / f"{session_id}.stl"
-
-    if output_path.exists() and hash_path.exists() and hash_path.read_text() == input_hash:
-        threemf_path = up / "outputs" / f"{session_id}.3mf"
-        zip_path = up / "outputs" / f"{session_id}_parts.zip"
-        part_paths = sorted(up.glob(f"outputs/{session_id}_part*.stl"))
-        stl_urls = [f"/storage/{user_id}/outputs/{p.name}" for p in part_paths]
-        return GenerateResponse(
-            stl_url=f"/storage/{user_id}/outputs/{session_id}.stl",
-            stl_urls=stl_urls,
-            threemf_url=f"/storage/{user_id}/outputs/{session_id}.3mf" if threemf_path.exists() else None,
-            split_count=max(1, len(stl_urls)),
-            zip_url=f"/storage/{user_id}/outputs/{session_id}_parts.zip" if zip_path.exists() else None,
-        )
 
     scaled = polygon_scaler.scale_to_mm(polygons, session.scale_factor)
     scaled = [polygon_scaler.add_clearance(p, req.cutout_clearance) for p in scaled]
     scaled = [polygon_scaler.simplify(p) for p in scaled]
 
-    threemf_path = up / "outputs" / f"{session_id}.3mf"
-    threemf_path.unlink(missing_ok=True)
-    for old in up.glob(f"outputs/{session_id}_part*.stl"):
-        old.unlink(missing_ok=True)
-    zip_path = up / "outputs" / f"{session_id}_parts.zip"
-    zip_path.unlink(missing_ok=True)
+    response = _run_generate(scaled, req, session_id, up, input_hash, user_id)
 
-    bin_body, text_body = stl_generator.generate_bin(scaled, req, str(output_path), str(threemf_path))
-
-    stl_urls: list[str] = []
-    zip_url = None
-    if req.bed_size > 0:
-        output_dir = str(up / "outputs")
-        part_paths = stl_generator.split_bin(bin_body, text_body, req, req.bed_size, output_dir, session_id)
-        if part_paths:
-            stl_urls = [f"/storage/{user_id}/outputs/{Path(p).name}" for p in part_paths]
-            import zipfile
-            part_bytes = [(Path(p).name, Path(p).read_bytes()) for p in part_paths]
-            with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zf:
-                for name, data in part_bytes:
-                    zf.writestr(name, data)
-            zip_url = f"/storage/{user_id}/outputs/{session_id}_parts.zip"
-
-    hash_path.write_text(input_hash)
-
+    output_path = up / "outputs" / f"{session_id}.stl"
     fresh_session = user_sessions.get(session_id)
     if fresh_session:
         fresh_session.stl_path = _rel(output_path, up)
         user_sessions.set(session_id, fresh_session)
 
-    threemf_url = None
-    if threemf_path.exists():
-        threemf_url = f"/storage/{user_id}/outputs/{session_id}.3mf"
-
-    return GenerateResponse(
-        stl_url=f"/storage/{user_id}/outputs/{session_id}.stl",
-        stl_urls=stl_urls,
-        threemf_url=threemf_url,
-        split_count=max(1, len(stl_urls)),
-        zip_url=zip_url,
-    )
+    return response
 
 
 @router.get("/sessions", response_model=SessionListResponse)
@@ -511,8 +545,6 @@ async def download_threemf(request: Request, session_id: str, user_id: str = Dep
 
 # --- tool library ---
 
-GF_GRID = 42.0
-
 
 @router.get("/tools", response_model=ToolListResponse)
 async def list_tools(request: Request, user_id: str = Depends(get_user_id)):
@@ -629,66 +661,24 @@ async def save_tools_from_session(request: Request, session_id: str, user_id: st
             pass
 
     for poly in session.polygons:
-        points_mm = [(p.x * sf, p.y * sf) for p in poly.points]
-        if not points_mm:
+        centered, fholes, interior_rings = polygon_scaler.scale_and_centre(poly, sf)
+        if not centered:
             continue
-
-        xs = [p[0] for p in points_mm]
-        ys = [p[1] for p in points_mm]
-        cx = (min(xs) + max(xs)) / 2
-        cy = (min(ys) + max(ys)) / 2
-        centered = [Point(x=p[0] - cx, y=p[1] - cy) for p in points_mm]
-
-        # scale and center interior rings
-        interior_rings_centered = []
-        for ring in poly.interior_rings:
-            ring_mm = [(p.x * sf, p.y * sf) for p in ring]
-            interior_rings_centered.append(
-                [Point(x=p[0] - cx, y=p[1] - cy) for p in ring_mm]
-            )
-
-        fholes = []
-        for fh in poly.finger_holes:
-            fholes.append(FingerHole(
-                id=fh.id,
-                x=fh.x * sf - cx,
-                y=fh.y * sf - cy,
-                radius=fh.radius,
-                width=fh.width,
-                height=fh.height,
-                rotation=fh.rotation,
-                shape=fh.shape,
-            ))
 
         tool_id = str(uuid.uuid4())
 
         thumbnail_path = None
         if src_img:
-            try:
-                px_xs = [p.x for p in poly.points]
-                px_ys = [p.y for p in poly.points]
-                pad = 20
-                left = max(0, int(min(px_xs)) - pad)
-                top = max(0, int(min(px_ys)) - pad)
-                right = min(src_img.width, int(max(px_xs)) + pad)
-                bottom = min(src_img.height, int(max(px_ys)) + pad)
-                crop = src_img.crop((left, top, right, bottom))
-                max_dim = max(crop.width, crop.height)
-                if max_dim > 256:
-                    scale = 256 / max_dim
-                    crop = crop.resize((int(crop.width * scale), int(crop.height * scale)), Image.LANCZOS)
-                thumb_file = up / "tools" / f"{tool_id}.jpg"
-                crop.convert("RGB").save(thumb_file, "JPEG", quality=80)
-                thumbnail_path = _rel(thumb_file, up)
-            except Exception:
-                pass
+            thumb_abs = generate_tool_thumbnail(src_img, poly.points, tool_id, up / "tools")
+            if thumb_abs:
+                thumbnail_path = _rel(thumb_abs, up)
 
         user_tools.set(tool_id, Tool(
             id=tool_id,
             name=poly.label,
             points=centered,
             finger_holes=fholes,
-            interior_rings=interior_rings_centered,
+            interior_rings=interior_rings,
             source_session_id=session_id,
             thumbnail_path=thumbnail_path,
             created_at=datetime.utcnow().isoformat(),
@@ -727,50 +717,7 @@ async def get_bin(request: Request, bin_id: str, user_id: str = Depends(get_user
     if not bin_data:
         raise HTTPException(status_code=404, detail="bin not found")
 
-    # sync placed tools with library versions
-    import math
-    changed = False
-    for pt in bin_data.placed_tools:
-        if not pt.tool_id:
-            continue
-        tool = user_tools.get(pt.tool_id)
-        if not tool or not tool.points:
-            continue
-
-        n_placed = len(pt.points)
-        placed_cx = sum(p.x for p in pt.points) / n_placed
-        placed_cy = sum(p.y for p in pt.points) / n_placed
-
-        n_lib = len(tool.points)
-        lib_cx = sum(p.x for p in tool.points) / n_lib
-        lib_cy = sum(p.y for p in tool.points) / n_lib
-
-        rot = math.radians(pt.rotation)
-        cos_r, sin_r = math.cos(rot), math.sin(rot)
-
-        new_points = []
-        for p in tool.points:
-            rx = (p.x - lib_cx) * cos_r - (p.y - lib_cy) * sin_r
-            ry = (p.x - lib_cx) * sin_r + (p.y - lib_cy) * cos_r
-            new_points.append(Point(x=placed_cx + rx, y=placed_cy + ry))
-
-        new_fh = []
-        for fh in tool.finger_holes:
-            rx = (fh.x - lib_cx) * cos_r - (fh.y - lib_cy) * sin_r
-            ry = (fh.x - lib_cx) * sin_r + (fh.y - lib_cy) * cos_r
-            new_fh.append(FingerHole(
-                id=fh.id, x=placed_cx + rx, y=placed_cy + ry,
-                radius=fh.radius, width=fh.width, height=fh.height,
-                rotation=fh.rotation, shape=fh.shape,
-            ))
-
-        if new_points != pt.points or new_fh != pt.finger_holes:
-            pt.points = new_points
-            pt.finger_holes = new_fh
-            pt.name = tool.name
-            changed = True
-
-    if changed:
+    if sync_placed_tools(bin_data, user_tools):
         user_bins.set(bin_id, bin_data)
 
     return bin_data
@@ -822,17 +769,9 @@ async def create_bin(request: Request, req: CreateBinRequest, user_id: str = Dep
         offset_x = bin_w / 2
         offset_y = bin_h / 2
         for pt in placed:
-            pt.points = [Point(x=p.x + offset_x, y=p.y + offset_y) for p in pt.points]
-            pt.finger_holes = [
-                FingerHole(id=fh.id, x=fh.x + offset_x, y=fh.y + offset_y,
-                           radius=fh.radius, width=fh.width, height=fh.height,
-                           rotation=fh.rotation, shape=fh.shape)
-                for fh in pt.finger_holes
-            ]
-            pt.interior_rings = [
-                [Point(x=p.x + offset_x, y=p.y + offset_y) for p in ring]
-                for ring in pt.interior_rings
-            ]
+            pt.points = _translate_points(pt.points, offset_x, offset_y)
+            pt.finger_holes = _translate_finger_holes(pt.finger_holes, offset_x, offset_y)
+            pt.interior_rings = [_translate_points(ring, offset_x, offset_y) for ring in pt.interior_rings]
 
     bin_data = BinModel(
         id=bin_id,
@@ -896,7 +835,6 @@ def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_u
 
     bc = bin_data.bin_config
 
-    import hashlib, json
     # include source tool smoothed state in hash so toggling invalidates cache
     smoothed_flags = {}
     for pt in bin_data.placed_tools:
@@ -912,21 +850,6 @@ def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_u
         "smoothed_flags": smoothed_flags,
     }
     input_hash = hashlib.md5(json.dumps(input_data, sort_keys=True, default=str).encode()).hexdigest()
-    hash_path = up / "outputs" / f"{bin_id}.hash"
-    output_path = up / "outputs" / f"{bin_id}.stl"
-
-    if output_path.exists() and hash_path.exists() and hash_path.read_text() == input_hash:
-        threemf_path = up / "outputs" / f"{bin_id}.3mf"
-        zip_path = up / "outputs" / f"{bin_id}_parts.zip"
-        part_paths = sorted(up.glob(f"outputs/{bin_id}_part*.stl"))
-        stl_urls = [f"/storage/{user_id}/outputs/{p.name}" for p in part_paths]
-        return GenerateResponse(
-            stl_url=f"/storage/{user_id}/outputs/{bin_id}.stl",
-            stl_urls=stl_urls,
-            threemf_url=f"/storage/{user_id}/outputs/{bin_id}.3mf" if threemf_path.exists() else None,
-            split_count=max(1, len(stl_urls)),
-            zip_url=f"/storage/{user_id}/outputs/{bin_id}_parts.zip" if zip_path.exists() else None,
-        )
 
     scaled = []
     for pt in bin_data.placed_tools:
@@ -965,47 +888,15 @@ def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_u
         bed_size=bc.bed_size,
     )
 
-    threemf_path = up / "outputs" / f"{bin_id}.3mf"
-    threemf_path.unlink(missing_ok=True)
-    for old in up.glob(f"outputs/{bin_id}_part*.stl"):
-        old.unlink(missing_ok=True)
-    zip_path = up / "outputs" / f"{bin_id}_parts.zip"
-    zip_path.unlink(missing_ok=True)
+    response = _run_generate(scaled, gen_req, bin_id, up, input_hash, user_id)
 
-    bin_body, text_body = stl_generator.generate_bin(scaled, gen_req, str(output_path), str(threemf_path))
-
-    stl_urls: list[str] = []
-    zip_url = None
-    if gen_req.bed_size > 0:
-        output_dir = str(up / "outputs")
-        part_paths = stl_generator.split_bin(bin_body, text_body, gen_req, gen_req.bed_size, output_dir, bin_id)
-        if part_paths:
-            stl_urls = [f"/storage/{user_id}/outputs/{Path(p).name}" for p in part_paths]
-            import zipfile
-            part_bytes = [(Path(p).name, Path(p).read_bytes()) for p in part_paths]
-            with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zf:
-                for name, data in part_bytes:
-                    zf.writestr(name, data)
-            zip_url = f"/storage/{user_id}/outputs/{bin_id}_parts.zip"
-
-    hash_path.write_text(input_hash)
-
+    output_path = up / "outputs" / f"{bin_id}.stl"
     fresh = user_bins.get(bin_id)
     if fresh:
         fresh.stl_path = _rel(output_path, up)
         user_bins.set(bin_id, fresh)
 
-    threemf_url = None
-    if threemf_path.exists():
-        threemf_url = f"/storage/{user_id}/outputs/{bin_id}.3mf"
-
-    return GenerateResponse(
-        stl_url=f"/storage/{user_id}/outputs/{bin_id}.stl",
-        stl_urls=stl_urls,
-        threemf_url=threemf_url,
-        split_count=max(1, len(stl_urls)),
-        zip_url=zip_url,
-    )
+    return response
 
 
 # bin file downloads

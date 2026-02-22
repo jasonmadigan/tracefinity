@@ -69,7 +69,7 @@ class PolygonsRequest(BaseModel):
     polygons: list[Polygon]
 
 
-class GenerateRequest(BaseModel):
+class BinParams(BaseModel):
     grid_x: int = 2
     grid_y: int = 2
     height_units: int = 4
@@ -78,9 +78,6 @@ class GenerateRequest(BaseModel):
     wall_thickness: float = 1.6
     cutout_depth: float = 20.0
     cutout_clearance: float = 1.0
-    polygons: list[Polygon] | None = None  # optional: use these instead of session polygons
-    text_labels: list[TextLabel] = []
-    bed_size: float = 256.0  # mm, 0 = no splitting
 
     @field_validator("grid_x", "grid_y")
     @classmethod
@@ -116,6 +113,12 @@ class GenerateRequest(BaseModel):
         if v < 0.4 or v > 5:
             raise ValueError("wall thickness must be between 0.4 and 5mm")
         return v
+
+
+class GenerateRequest(BinParams):
+    polygons: list[Polygon] | None = None  # optional: use these instead of session polygons
+    text_labels: list[TextLabel] = []
+    bed_size: float = 256.0  # mm, 0 = no splitting
 
 
 class GenerateResponse(BaseModel):
@@ -230,15 +233,7 @@ class PlacedTool(BaseModel):
     rotation: float = 0.0  # degrees, applied on top of library points
 
 
-class BinConfig(BaseModel):
-    grid_x: int = 2
-    grid_y: int = 2
-    height_units: int = 4
-    magnets: bool = True
-    stacking_lip: bool = True
-    wall_thickness: float = 1.6
-    cutout_depth: float = 20.0
-    cutout_clearance: float = 1.0
+class BinConfig(BinParams):
     text_labels: list[TextLabel] = []
     bed_size: float = 256.0
 

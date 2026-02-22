@@ -10,6 +10,7 @@ import { polygonPathData } from '@/lib/svg'
 import { Trash2, Clock, Package, Plus, Loader2 } from 'lucide-react'
 import { Alert } from '@/components/Alert'
 import { PhotoIllustration, CornersIllustration, TraceIllustration, OrganiseIllustration } from '@/components/OnboardingIllustrations'
+import { GRID_UNIT } from '@/lib/constants'
 
 function ToolOutline({ points, interiorRings }: { points: Point[]; interiorRings?: Point[][] }) {
   if (points.length === 0) return null
@@ -44,8 +45,6 @@ function ToolOutline({ points, interiorRings }: { points: Point[]; interiorRings
     </svg>
   )
 }
-
-const GRID_UNIT = 42
 
 function BinPreview({ gridX, gridY, tools }: { gridX: number; gridY: number; tools: BinPreviewTool[] }) {
   const binW = gridX * GRID_UNIT

@@ -15,7 +15,8 @@ from app.services.polygon_scaler import ScaledPolygon
 
 logger = logging.getLogger(__name__)
 
-GF_GRID = 42.0
+from app.constants import GF_GRID
+
 GF_HEIGHT_UNIT = 7.0
 GF_BASE_HEIGHT = 4.75
 GF_CORNER_R = 3.75     # 4.0 - 0.25 inset

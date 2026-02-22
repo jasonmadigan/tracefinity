@@ -3,27 +3,13 @@ export interface Point {
   y: number
 }
 
-export type CutoutShape = 'circle' | 'square' | 'rectangle'
-
-export interface Cutout {
-  id: string
-  shape: CutoutShape
-  x: number
-  y: number
-  radius: number // for circles, or half-width for squares
-  width?: number // for rectangles
-  height?: number // for rectangles
-  rotation: number // degrees
-}
-
-// keep for backwards compat
 export interface FingerHole {
   id: string
   x: number
   y: number
   radius: number
   rotation?: number
-  shape?: CutoutShape
+  shape?: 'circle' | 'square' | 'rectangle'
   width?: number
   height?: number
 }
@@ -33,7 +19,7 @@ export interface Polygon {
   points: Point[]
   label: string
   finger_holes: FingerHole[]
-  interior_rings?: Point[][]
+  interior_rings: Point[][]
 }
 
 export interface TextLabel {
@@ -125,7 +111,7 @@ export interface Tool {
   name: string
   points: Point[]
   finger_holes: FingerHole[]
-  interior_rings?: Point[][]
+  interior_rings: Point[][]
   smoothed: boolean
   smooth_level: number
   source_session_id: string | null
@@ -138,7 +124,7 @@ export interface ToolSummary {
   created_at: string | null
   point_count: number
   points: Point[]
-  interior_rings?: Point[][]
+  interior_rings: Point[][]
   smoothed: boolean
   smooth_level: number
   thumbnail_url: string | null
@@ -152,7 +138,7 @@ export interface PlacedTool {
   name: string
   points: Point[]
   finger_holes: FingerHole[]
-  interior_rings?: Point[][]
+  interior_rings: Point[][]
   rotation: number
 }
 
@@ -168,7 +154,7 @@ export interface BinData {
 
 export interface BinPreviewTool {
   points: Point[]
-  interior_rings?: Point[][]
+  interior_rings: Point[][]
 }
 
 export interface BinSummary {

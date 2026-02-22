@@ -2,7 +2,7 @@ import math
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.validation import make_valid
 
-from app.models.schemas import Polygon, Point
+from app.models.schemas import Polygon, Point, FingerHole
 
 
 def _chaikin_smooth(
@@ -80,6 +80,44 @@ class PolygonScaler:
             ]
             scaled.append(ScaledPolygon(poly.id, points_mm, poly.label, finger_holes, interior_rings_mm))
         return scaled
+
+    def scale_and_centre(
+        self, poly: Polygon, scale_factor: float
+    ) -> tuple[list[Point], list[FingerHole], list[list[Point]]]:
+        """convert polygon from pixels to mm and centre at origin"""
+        points_mm = [(p.x * scale_factor, p.y * scale_factor) for p in poly.points]
+        if not points_mm:
+            return [], [], []
+
+        xs = [p[0] for p in points_mm]
+        ys = [p[1] for p in points_mm]
+        cx = (min(xs) + max(xs)) / 2
+        cy = (min(ys) + max(ys)) / 2
+
+        centered = [Point(x=p[0] - cx, y=p[1] - cy) for p in points_mm]
+
+        interior_rings = []
+        for ring in poly.interior_rings:
+            ring_mm = [(p.x * scale_factor, p.y * scale_factor) for p in ring]
+            interior_rings.append(
+                [Point(x=p[0] - cx, y=p[1] - cy) for p in ring_mm]
+            )
+
+        finger_holes = [
+            FingerHole(
+                id=fh.id,
+                x=fh.x * scale_factor - cx,
+                y=fh.y * scale_factor - cy,
+                radius=fh.radius,
+                width=fh.width,
+                height=fh.height,
+                rotation=fh.rotation,
+                shape=fh.shape,
+            )
+            for fh in poly.finger_holes
+        ]
+
+        return centered, finger_holes, interior_rings
 
     def add_clearance(self, polygon: ScaledPolygon, clearance_mm: float) -> ScaledPolygon:
         """expand polygon outward by clearance amount"""

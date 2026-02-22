@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import { useDebouncedSave } from '@/hooks/useDebouncedSave'
 import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { PaperCornerEditor } from '@/components/PaperCornerEditor'
 import { PolygonEditor } from '@/components/PolygonEditor'
@@ -209,28 +210,16 @@ export default function TracePage() {
     }
   }
 
-  const savePendingRef = useRef<(() => void) | null>(null)
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-
   const handlePolygonsChange = useCallback((updated: Polygon[]) => {
     setPolygons(updated)
-    const doSave = () => {
-      updatePolygons(sessionId, updated).catch(() => {})
-    }
-    savePendingRef.current = doSave
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    saveTimeoutRef.current = setTimeout(() => {
-      savePendingRef.current = null
-      doSave()
-    }, 300)
-  }, [sessionId])
-
-  // flush pending save on unload
-  useEffect(() => {
-    const flush = () => { savePendingRef.current?.() }
-    window.addEventListener('beforeunload', flush)
-    return () => window.removeEventListener('beforeunload', flush)
   }, [])
+
+  useDebouncedSave(
+    () => updatePolygons(sessionId, polygons),
+    [polygons, sessionId],
+    300,
+    { skipInitial: true }
+  )
 
   // clear status interval on unmount (if user navigates away mid-trace)
   useEffect(() => {

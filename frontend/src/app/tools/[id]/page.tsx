@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Loader2, ArrowLeft, Check, Download } from 'lucide-react'
 import { getTool, updateTool, getToolSvgUrl } from '@/lib/api'
+import { useDebouncedSave } from '@/hooks/useDebouncedSave'
 import { ToolEditor } from '@/components/ToolEditor'
 import { Alert } from '@/components/Alert'
 import type { Tool, Point, FingerHole } from '@/types'
@@ -17,11 +18,6 @@ export default function ToolPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const savedTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const initialLoadRef = useRef(true)
-
   useEffect(() => {
     async function load() {
       try {
@@ -32,49 +28,20 @@ export default function ToolPage() {
         setError('Tool not found')
       } finally {
         setLoading(false)
-        setTimeout(() => { initialLoadRef.current = false }, 100)
       }
     }
     load()
   }, [toolId])
 
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const pendingSaveRef = useRef<(() => void) | null>(null)
-
-  // save whenever tool state changes (short debounce to batch drag events)
-  useEffect(() => {
-    if (!tool || initialLoadRef.current) return
-    const doSave = async () => {
-      setSaving(true)
-      setSaved(false)
-      try {
-        await updateTool(toolId, { name, points: tool.points, finger_holes: tool.finger_holes, smoothed: tool.smoothed, smooth_level: tool.smooth_level })
-        setSaved(true)
-        if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
-        savedTimerRef.current = setTimeout(() => setSaved(false), 2000)
-      } catch {
-        // ignore
-      } finally {
-        setSaving(false)
-      }
-    }
-    pendingSaveRef.current = doSave
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    saveTimeoutRef.current = setTimeout(() => {
-      pendingSaveRef.current = null
-      doSave()
-    }, 150)
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    }
-  }, [tool, name, toolId])
-
-  // flush pending save on page unload
-  useEffect(() => {
-    const flush = () => { pendingSaveRef.current?.() }
-    window.addEventListener('beforeunload', flush)
-    return () => window.removeEventListener('beforeunload', flush)
-  }, [])
+  const { saving, saved } = useDebouncedSave(
+    async () => {
+      if (!tool) return
+      await updateTool(toolId, { name, points: tool.points, finger_holes: tool.finger_holes, smoothed: tool.smoothed, smooth_level: tool.smooth_level })
+    },
+    [tool, name, toolId],
+    150,
+    { skipInitial: true }
+  )
 
   const handlePointsChange = useCallback((points: Point[]) => {
     setTool(prev => prev ? { ...prev, points } : null)

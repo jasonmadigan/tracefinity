@@ -104,3 +104,15 @@ export function smoothPathData(
   }
   return d
 }
+
+export function smoothEpsilon(points: Point[], level: number): number {
+  let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity
+  for (const p of points) { mnX = Math.min(mnX, p.x); mnY = Math.min(mnY, p.y); mxX = Math.max(mxX, p.x); mxY = Math.max(mxY, p.y) }
+  const diag = Math.hypot(mxX - mnX, mxY - mnY)
+  const factor = 0.002 + level * 0.006
+  return Math.max(0.3, diag * factor)
+}
+
+export function snapToGrid(v: number, grid: number): number {
+  return Math.round(v / grid) * grid
+}
