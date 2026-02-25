@@ -119,6 +119,7 @@ EOF
 EXPOSE 3000
 
 ENV GOOGLE_API_KEY=""
+ENV GEMINI_IMAGE_MODEL="gemini-3-pro-image-preview"
 ENV STORAGE_PATH=/app/storage
 
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/tracefinity.conf"]

@@ -39,7 +39,12 @@ docker run -p 3000:3000 -v ./data:/app/storage -e GOOGLE_API_KEY=your-key ghcr.i
 
 Open http://localhost:3000
 
-The `GOOGLE_API_KEY` is optional - you can use the manual mask upload workflow instead.
+The `GOOGLE_API_KEY` is optional -- you can use the manual mask upload workflow instead.
+
+| Variable | Default | Description |
+|-|-|-|
+| `GOOGLE_API_KEY` | | Gemini API key (optional) |
+| `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` | Model for mask generation (see below) |
 
 ### From Source
 
@@ -79,7 +84,7 @@ Open http://localhost:4001
 
 ## How the AI Tracing Works
 
-Tracefinity uses Google's [Gemini API](https://ai.google.dev/) with the `gemini-3-pro-image-preview` model, which can generate images from prompts.
+Tracefinity uses Google's [Gemini API](https://ai.google.dev/) to generate mask images from photos.
 
 1. Your photo is sent to Gemini with a prompt asking for a black and white silhouette mask
 2. Gemini returns a mask image with tools in black, background in white
@@ -88,13 +93,24 @@ Tracefinity uses Google's [Gemini API](https://ai.google.dev/) with the `gemini-
 
 The UI shows you exactly what prompts are sent before you click "Trace".
 
+### Model selection
+
+Set `GEMINI_IMAGE_MODEL` to choose which Gemini model generates masks:
+
+| Model | Pros | Cons |
+|-|-|-|
+| `gemini-3-pro-image-preview` (default) | Best mask quality, pixel-accurate alignment | Preview model, occasional outages |
+| `gemini-2.5-flash-image` | Faster, cheaper, GA | Returns arbitrary dimensions, needs post-hoc alignment (~5px tolerance) |
+
+The flash model returns masks at different dimensions than requested, so Tracefinity uses template matching to align the mask to the original photo. This adds ~20ms and gets within a few pixels.
+
 ### Why Gemini?
 
 Several approaches were tested before settling on Gemini's image generation:
 
-- **OpenCV** - Traditional computer vision (edge detection, thresholding, watershed) struggles with varied lighting, shadows, and tools that blend into backgrounds
-- **OpenAI/Anthropic** - Vision models can describe images but can't generate the mask images needed for contour extraction
-- **Gemini** - The `gemini-3-pro-image-preview` model can both understand the image and generate a clean silhouette mask, handling shadows and complex shapes reliably
+- **OpenCV** -- Traditional computer vision (edge detection, thresholding, watershed) struggles with varied lighting, shadows, and tools that blend into backgrounds
+- **OpenAI/Anthropic** -- Vision models can describe images but can't generate the mask images needed for contour extraction
+- **Gemini** -- Image generation models can both understand the photo and generate a clean silhouette mask, handling shadows and complex shapes reliably
 
 To get an API key: [Google AI Studio](https://aistudio.google.com/apikey) (free tier available).
 

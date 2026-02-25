@@ -8,6 +8,7 @@ from typing import Optional
 class Settings(BaseSettings):
     storage_path: Path = Path("./storage")
     google_api_key: Optional[str] = None
+    gemini_image_model: str = "gemini-3-pro-image-preview"
     max_upload_mb: int = 20
     log_level: str = "INFO"
     proxy_secret: Optional[str] = None

@@ -23,9 +23,9 @@ make dev  # starts backend (:8000) and frontend (:4001) concurrently
 
 ## Key Constraints
 
-**Gemini models**: Use `gemini-3-pro-image-preview` with `response_modalities=["TEXT", "IMAGE"]` for mask generation. This is the only model that works for image generation -- do not change it. Labels use `gemini-2.0-flash` (text only).
+**Gemini models**: Mask generation model is configurable via `GEMINI_IMAGE_MODEL` env var (default `gemini-3-pro-image-preview`). Also supports `gemini-2.5-flash-image` (faster but needs post-hoc alignment). Both use `response_modalities=["TEXT", "IMAGE"]`. Labels use `gemini-2.0-flash` (text only).
 
-**Mask format**: tools BLACK (#000000), background WHITE (#FFFFFF). `_trace_mask()` handles both alpha-channel and RGB masks. Gemini returns masks at different dimensions than input -- always resize to match original before tracing contours.
+**Mask format**: tools BLACK (#000000), background WHITE (#FFFFFF). The prompt asks for a "stencil" image. `_trace_mask()` handles both alpha-channel and RGB masks. Gemini returns masks at different dimensions than requested -- after resizing to match the original, `_align_mask()` uses template matching to correct any positional offset.
 
 **Coordinate systems**:
 - Trace page: image pixels

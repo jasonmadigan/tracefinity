@@ -101,7 +101,7 @@ def _convert_heic_to_jpeg(content: bytes, original_ext: str) -> tuple[bytes, str
 
 
 image_processor = ImageProcessor()
-ai_tracer = AITracer()
+ai_tracer = AITracer(model=settings.gemini_image_model)
 polygon_scaler = PolygonScaler()
 stl_generator = ManifoldSTLGenerator()
 
@@ -285,6 +285,9 @@ async def trace_tools(request: Request, session_id: str, req: TraceRequest, user
             api_key,
             mask_output_path,
         )
+    except TimeoutError:
+        logging.warning("gemini timed out after 60s")
+        raise HTTPException(status_code=504, detail="Gemini timed out — the model may be overloaded. Try again shortly.")
     except Exception as e:
         error_msg = str(e)
         if "insufficient_quota" in error_msg or "exceeded" in error_msg.lower():
@@ -293,8 +296,9 @@ async def trace_tools(request: Request, session_id: str, req: TraceRequest, user
             raise HTTPException(status_code=401, detail="Invalid API key")
         if "rate_limit" in error_msg.lower():
             raise HTTPException(status_code=429, detail="Rate limited - try again shortly")
-        logging.error("ai tracing failed: %s", error_msg[:500])
-        raise HTTPException(status_code=500, detail="AI tracing failed. Please try again.")
+        logging.error("ai tracing failed: %s", error_msg[:500], exc_info=True)
+        detail = f"AI tracing failed ({type(e).__name__}: {error_msg[:200]})"
+        raise HTTPException(status_code=500, detail=detail)
 
     session.polygons = polygons
     session.mask_image_path = _rel(mask_path, up) if mask_path else None

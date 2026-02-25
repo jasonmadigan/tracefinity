@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 import tempfile
 from pathlib import Path
@@ -12,7 +13,9 @@ import numpy as np
 from app.models.schemas import Polygon, Point
 
 
-MASK_PROMPT_GEMINI = """Create a black and white mask of this image.
+# gemini-3-pro respects output dimensions precisely, so a direct
+# "create a mask" instruction works and alignment is trivial.
+MASK_PROMPT_PRO = """Create a black and white mask of this image.
 
 CRITICAL: The output image MUST be EXACTLY {width}x{height} pixels - the same as the input.
 
@@ -24,6 +27,18 @@ Instructions:
 5. Tool position must stay exactly where it is
 
 Output a {width}x{height} pixel image with black tool silhouette on white background."""
+
+# gemini-2.5-flash ignores dimension requests and returns arbitrary sizes.
+# "stencil" language produces cleaner B/W output than "mask" language.
+MASK_PROMPT_FLASH = """Look at the input photo and find every tool/object on the paper.
+
+Now generate a completely new {width}x{height} pixel image that is:
+- A completely white (#FFFFFF) background
+- With a filled black (#000000) silhouette for each tool, in the same position as in the photo
+
+The output must look like a stencil — solid black shapes on a solid white rectangle. No photograph content, no textures, no grey, no gradients, no edges of the original image. Just flat black shapes on flat white.
+
+Output dimensions must be exactly {width}x{height} pixels. Tool positions must match the input photo."""
 
 
 LABEL_PROMPT = """This image shows tools on a white background. There are {count} tools detected.
@@ -40,8 +55,19 @@ Return ONLY valid JSON:
 Keep labels short (e.g. "wrench", "screwdriver", "pliers").
 Return labels in the same order as the positions listed above."""
 
+# models that need post-hoc alignment (don't respect output dimensions)
+_NEEDS_ALIGNMENT = {"gemini-2.5-flash-image"}
+
 
 class AITracer:
+    def __init__(self, model: str = "gemini-3-pro-image-preview"):
+        self.model = model
+
+    def _mask_prompt(self, width: int, height: int) -> str:
+        if self.model in _NEEDS_ALIGNMENT:
+            return MASK_PROMPT_FLASH.format(width=width, height=height)
+        return MASK_PROMPT_PRO.format(width=width, height=height)
+
     async def trace_tools(
         self,
         image_path: str,
@@ -58,7 +84,8 @@ class AITracer:
         if not mask_path:
             return [], None
 
-        contours = self._trace_mask(mask_path, image_path)
+        align = self.model in _NEEDS_ALIGNMENT
+        contours = self._trace_mask(mask_path, image_path, align=align)
         if not contours:
             return [], mask_output_path
 
@@ -133,22 +160,23 @@ class AITracer:
             # scale down to stay in the cheaper 2K output tier
             if max(width, height) > self.MAX_MASK_DIM:
                 scale = self.MAX_MASK_DIM / max(width, height)
-                new_w, new_h = int(width * scale), int(height * scale)
-                resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                req_w, req_h = int(width * scale), int(height * scale)
+                resized = cv2.resize(img, (req_w, req_h), interpolation=cv2.INTER_AREA)
                 _, buf = cv2.imencode(".png", resized)
                 image_bytes = buf.tobytes()
                 mime_type = "image/png"
-                prompt = MASK_PROMPT_GEMINI.format(width=new_w, height=new_h)
+                prompt = self._mask_prompt(req_w, req_h)
             else:
                 with open(image_path, "rb") as f:
                     image_bytes = f.read()
                 mime_type = self._get_media_type(image_path)
-                prompt = MASK_PROMPT_GEMINI.format(width=width, height=height)
+                prompt = self._mask_prompt(width, height)
 
+            logging.info("generating mask with %s", self.model)
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     client.models.generate_content,
-                    model="gemini-3-pro-image-preview",
+                    model=self.model,
                     contents=[
                         prompt,
                         types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
@@ -176,7 +204,13 @@ class AITracer:
         except Exception:
             raise
 
-    def _trace_mask(self, mask_path: str, original_path: str, min_area: int = 5000) -> list[tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]]:
+    def _trace_mask(
+        self,
+        mask_path: str,
+        original_path: str,
+        min_area: int = 5000,
+        align: bool = False,
+    ) -> list[tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]]:
         """trace contours from mask image. returns list of (exterior, [holes])."""
         from shapely.geometry import Polygon as ShapelyPolygon
         from shapely.ops import unary_union
@@ -213,7 +247,13 @@ class AITracer:
 
         # resize mask to match original image dimensions
         if mask_h != target_h or mask_w != target_w:
+            logging.info("resizing mask %dx%d -> %dx%d", mask_w, mask_h, target_w, target_h)
             thresh = cv2.resize(thresh, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+
+        # flash model returns content at unpredictable offsets — correct via
+        # template matching. pro model respects dimensions so skip this.
+        if align:
+            thresh = self._align_mask(thresh, original)
 
         kernel = np.ones((3, 3), np.uint8)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
@@ -225,7 +265,7 @@ class AITracer:
 
         hierarchy = hierarchy[0]  # shape: (N, 4) — [next, prev, child, parent]
 
-        # build parent→children mapping from hierarchy
+        # build parent->children mapping from hierarchy
         parent_children: dict[int, list[int]] = {}
         for i, h in enumerate(hierarchy):
             parent_idx = h[3]
@@ -304,6 +344,65 @@ class AITracer:
             results.append((clamped, hole_rings))
 
         return results
+
+    @staticmethod
+    def _align_mask(thresh: np.ndarray, original: np.ndarray) -> np.ndarray:
+        """correct positional offset between mask and image via template matching.
+
+        gemini flash returns masks at arbitrary dimensions. after resizing to
+        match the original, the tool silhouette may be offset by tens to hundreds
+        of pixels. we extract the tool region from the mask and match it against
+        the inverted photo to find the translation that best aligns them.
+        """
+        h, w = thresh.shape[:2]
+        work = 0.25
+        ww, wh = int(w * work), int(h * work)
+        if ww < 64 or wh < 64:
+            return thresh
+
+        mask_s = cv2.resize(thresh, (ww, wh), interpolation=cv2.INTER_NEAREST)
+        orig_gray = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+        corr_s = cv2.resize(255 - orig_gray, (ww, wh), interpolation=cv2.INTER_AREA)
+
+        # find tool bbox in reduced mask
+        contours, _ = cv2.findContours(mask_s.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return thresh
+        largest = max(contours, key=cv2.contourArea)
+        bx, by, bw, bh = cv2.boundingRect(largest)
+
+        # template: tool region with padding for context
+        pad = 30
+        tx1, ty1 = max(0, bx - pad), max(0, by - pad)
+        tx2, ty2 = min(ww, bx + bw + pad), min(wh, by + bh + pad)
+        template = mask_s[ty1:ty2, tx1:tx2].astype(np.float32)
+
+        # search region: template area plus margin for shift detection
+        margin = 75  # ~300px at full resolution
+        sx1, sy1 = max(0, tx1 - margin), max(0, ty1 - margin)
+        sx2, sy2 = min(ww, tx2 + margin), min(wh, ty2 + margin)
+        search = corr_s[sy1:sy2, sx1:sx2].astype(np.float32)
+
+        if template.shape[0] >= search.shape[0] or template.shape[1] >= search.shape[1]:
+            return thresh
+
+        result = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+        # shift = matched position minus expected position
+        dx = (max_loc[0] - (tx1 - sx1)) / work
+        dy = (max_loc[1] - (ty1 - sy1)) / work
+        logging.info("mask alignment: shift=(%.1f, %.1f)px, score=%.3f", dx, dy, max_val)
+
+        max_shift = max(w, h) * 0.1
+        if max_val < 0.15 or (abs(dx) < 2 and abs(dy) < 2):
+            return thresh
+        if abs(dx) > max_shift or abs(dy) > max_shift:
+            logging.warning("mask alignment shift too large, skipping")
+            return thresh
+
+        M = np.float32([[1, 0, dx], [0, 1, dy]])
+        return cv2.warpAffine(thresh, M, (w, h), flags=cv2.INTER_NEAREST)
 
     async def _get_labels(
         self,
