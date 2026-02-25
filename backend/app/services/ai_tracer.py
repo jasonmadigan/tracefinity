@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 import tempfile
@@ -144,15 +145,19 @@ class AITracer:
                 mime_type = self._get_media_type(image_path)
                 prompt = MASK_PROMPT_GEMINI.format(width=width, height=height)
 
-            response = client.models.generate_content(
-                model="gemini-3-pro-image-preview",
-                contents=[
-                    prompt,
-                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                ],
-                config=types.GenerateContentConfig(
-                    response_modalities=["TEXT", "IMAGE"],
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.models.generate_content,
+                    model="gemini-3-pro-image-preview",
+                    contents=[
+                        prompt,
+                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_modalities=["TEXT", "IMAGE"],
+                    ),
                 ),
+                timeout=60,
             )
 
             for part in response.candidates[0].content.parts:
@@ -342,12 +347,16 @@ class AITracer:
 
         mime_type = self._get_media_type(image_path)
 
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[
-                prompt,
-                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-            ],
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.models.generate_content,
+                model="gemini-2.0-flash",
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                ],
+            ),
+            timeout=30,
         )
         return response.text
 
