@@ -62,7 +62,27 @@ export default function BinPage() {
       try {
         const [data, tools] = await Promise.all([getBin(binId), listTools()])
         setBinData(data)
-        setPlacedTools(data.placed_tools)
+
+        // sync placed tools with library (e.g. filled-in interior rings)
+        const toolMap = new Map(tools.map(t => [t.id, t]))
+        const synced = data.placed_tools.map(pt => {
+          const lib = toolMap.get(pt.tool_id)
+          if (!lib) return pt
+          const rad = (pt.rotation || 0) * Math.PI / 180
+          const cos = Math.cos(rad)
+          const sin = Math.sin(rad)
+          const n = pt.points.length || 1
+          const cx = pt.points.reduce((s, p) => s + p.x, 0) / n
+          const cy = pt.points.reduce((s, p) => s + p.y, 0) / n
+          const newRings = (lib.interior_rings ?? []).map(ring =>
+            ring.map(p => ({
+              x: p.x * cos - p.y * sin + cx,
+              y: p.x * sin + p.y * cos + cy,
+            }))
+          )
+          return { ...pt, interior_rings: newRings }
+        })
+        setPlacedTools(synced)
         setTextLabels(data.text_labels)
         setName(data.name || '')
         setConfig(data.bin_config)
