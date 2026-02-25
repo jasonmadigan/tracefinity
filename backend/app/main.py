@@ -9,11 +9,27 @@ from starlette.responses import Response
 
 from app.config import settings
 
-logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+LOG_DATEFMT = "%H:%M:%S"
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format=LOG_FORMAT,
+    datefmt=LOG_DATEFMT,
+)
+
 from app.api.routes import router
 from app.api.user_routes import router as user_router
 
 app = FastAPI(title="Tracefinity API", version="0.1.0")
+
+
+@app.on_event("startup")
+def _configure_uvicorn_logging():
+    fmt = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT)
+    for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+        for h in logging.getLogger(name).handlers:
+            h.setFormatter(fmt)
 
 
 class ProxySecretMiddleware(BaseHTTPMiddleware):
