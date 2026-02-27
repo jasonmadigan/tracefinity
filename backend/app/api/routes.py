@@ -623,20 +623,38 @@ async def download_tool_svg(request: Request, tool_id: str, user_id: str = Depen
     if not tool or not tool.points:
         raise HTTPException(status_code=404, detail="tool not found")
 
-    xs = [p.x for p in tool.points]
-    ys = [p.y for p in tool.points]
+    points_mm = [(p.x, p.y) for p in tool.points]
+    interior_rings_mm = [[(p.x, p.y) for p in ring] for ring in tool.interior_rings]
+    fholes = [ScaledFingerHole(fh.x, fh.y, fh.diameter) for fh in tool.finger_holes]
+    sp = ScaledPolygon(tool.id, points_mm, tool.name, fholes, interior_rings_mm)
+
+    if tool.smoothed:
+        sp = polygon_scaler.smooth(sp, level=tool.smooth_level)
+    else:
+        sp = polygon_scaler.simplify(sp)
+
+    xs = [p[0] for p in sp.points_mm]
+    ys = [p[1] for p in sp.points_mm]
     pad = 1.0
     min_x, max_x = min(xs) - pad, max(xs) + pad
     min_y, max_y = min(ys) - pad, max(ys) + pad
     w = max_x - min_x
     h = max_y - min_y
 
-    pts = " ".join(f"{p.x},{p.y}" for p in tool.points)
+    # outer polygon
+    pts = " ".join(f"{x:.4f},{y:.4f}" for x, y in sp.points_mm)
+    paths = f'  <polygon points="{pts}" fill="black" stroke="none"/>\n'
+
+    # interior holes
+    for ring in sp.interior_rings_mm:
+        ring_pts = " ".join(f"{x:.4f},{y:.4f}" for x, y in ring)
+        paths += f'  <polygon points="{ring_pts}" fill="white" stroke="none"/>\n'
+
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg"'
         f' width="{w:.4f}mm" height="{h:.4f}mm"'
         f' viewBox="{min_x:.4f} {min_y:.4f} {w:.4f} {h:.4f}">\n'
-        f'  <polygon points="{pts}" fill="black" stroke="none"/>\n'
+        f'{paths}'
         f'</svg>\n'
     )
 
