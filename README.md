@@ -70,17 +70,24 @@ Open http://localhost:4001
 
 ## Features
 
-- **AI-powered tracing** - Gemini generates accurate tool silhouettes
-- **Manual mask upload** - Use Gemini web interface without an API key
-- **Tool library** - Save traced tools and reuse them across multiple bins
-- **Bin builder** - Drag and arrange tools, auto-sizing grid to fit
-- **Manual refinement** - Edit traced outlines with vertex tools
-- **Finger holes** - Add circular, square, or rectangular cutouts for easy tool removal
-- **Text labels** - Recessed or embossed text on bins
-- **Gridfinity compatible** - Proper base profile, magnet holes, stacking lip
-- **Live 3D preview** - See your bin before printing
-- **3MF export** - Multi-colour printing support for embossed text
-- **Bed splitting** - Large bins auto-split into printable pieces with diagonal fit detection
+- **AI-powered tracing** -- Gemini generates accurate tool silhouettes from photos
+- **Manual mask upload** -- Use the Gemini web interface without an API key
+- **Selective saving** -- Choose which traced outlines to keep before saving to your library
+- **Tool library** -- Save traced tools and reuse them across multiple bins
+- **Tool editor** -- Rotate tools, add/remove vertices, adjust outlines, snap to grid
+- **Smooth or accurate** -- Toggle Chaikin subdivision for smooth curves, or keep the raw trace; SVG and STL exports both respect this
+- **Finger holes** -- Circular, square, or rectangular cutouts for easy tool removal
+- **Interior rings** -- Hollow tools (e.g. spanners) traced correctly with holes preserved
+- **Bin builder** -- Drag and arrange tools with snap-to-grid, auto-sizing to fit the gridfinity grid
+- **Cutout clearance** -- Configurable tolerance so tools fit without being too loose
+- **Text labels** -- Recessed or embossed text on bins
+- **Gridfinity compatible** -- Proper base profile, magnet holes, stacking lip
+- **Live 3D preview** -- See your bin in three.js before printing
+- **STL and 3MF export** -- 3MF supports multi-colour printing for embossed text
+- **SVG export** -- Individual tool outlines as SVG, with smoothing applied
+- **Bed splitting** -- Large bins auto-split into printable pieces with diagonal fit detection
+- **Landscape and portrait** -- Paper orientation auto-detected from corner positions
+- **Single-container Docker** -- Frontend and backend in one image, data in a single volume
 
 ## How the AI Tracing Works
 
