@@ -11,6 +11,8 @@ import logging
 
 from PIL import Image, ImageOps
 
+from app.models.schemas import CaptureCrop
+
 logger = logging.getLogger(__name__)
 
 HEIC_EXTENSIONS = {".heic", ".heif"}
@@ -23,13 +25,27 @@ except ImportError:
     pass
 
 
-def ingest_image(content: bytes, ext: str, max_dim: int | None = None) -> tuple[bytes, str, float]:
+def _crop_bounds(width: int, height: int, crop: CaptureCrop) -> tuple[int, int, int, int]:
+    left = max(0, min(width - 1, int(round(crop.x * width))))
+    top = max(0, min(height - 1, int(round(crop.y * height))))
+    right = max(left + 4, min(width, int(round((crop.x + crop.width) * width))))
+    bottom = max(top + 4, min(height, int(round((crop.y + crop.height) * height))))
+    return left, top, right, bottom
+
+
+def ingest_image(
+    content: bytes,
+    ext: str,
+    max_dim: int | None = None,
+    capture_crop: CaptureCrop | None = None,
+) -> tuple[bytes, str, float]:
     """normalise an uploaded image. returns (bytes, ext, downscale_ratio).
 
     HEIC becomes JPEG, EXIF orientation is applied to the pixels and the tag
-    dropped, and the long edge is capped at max_dim. ratio is <1 when shrunk;
-    the long edge lands exactly on max_dim so the ratio is exact for it and
-    within half a pixel for the short edge (dimensions are rounded)."""
+    dropped, an optional fractional crop is applied to the upright image, and
+    the long edge is capped at max_dim. ratio is <1 when shrunk; the long edge
+    lands exactly on max_dim so the ratio is exact for it and within half a
+    pixel for the short edge (dimensions are rounded)."""
     img = Image.open(io.BytesIO(content))
     changed = False
     new_ext = ext.lower()
@@ -40,6 +56,12 @@ def ingest_image(content: bytes, ext: str, max_dim: int | None = None) -> tuple[
 
     if img.getexif().get(_ORIENTATION_TAG, 1) != 1:
         img = ImageOps.exif_transpose(img)
+        changed = True
+
+    if capture_crop is not None:
+        w, h = img.size
+        img = img.crop(_crop_bounds(w, h, capture_crop))
+        logger.info("cropped image %dx%d -> %dx%d", w, h, img.width, img.height)
         changed = True
 
     ratio = 1.0

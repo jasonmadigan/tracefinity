@@ -1,16 +1,18 @@
 import hashlib
+import io
 import json
 import logging
 import math
 import os
 import re
+import shutil
 import threading
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from PIL import Image
 from starlette.requests import Request
@@ -36,17 +38,27 @@ from app.models.schemas import (
     BinProjectUpdateRequest,
     BinSummary,
     BinUpdateRequest,
+    CaptureCrop,
     CornersRequest,
     CornersResponse,
     CreateBinRequest,
     FingerHole,
     GenerateRequest,
     GenerateResponse,
+    PhotoStation,
+    PhotoStationCreateRequest,
+    PhotoStationListResponse,
+    PhotoStationSuggestion,
+    PhotoStationSuggestionsResponse,
+    PhotoStationUpdateRequest,
     PlacedTool,
     Point,
     Polygon,
     PolygonsRequest,
     ProjectHealthResponse,
+    RedetectCornersResponse,
+    ReuseCornersRequest,
+    ReuseCornersResponse,
     SaveToolsRequest,
     SaveToolsResponse,
     Session,
@@ -71,6 +83,7 @@ from app.services.image_ingest import ingest_image
 from app.services.image_processor import ImageProcessor
 from app.services.image_service import generate_tool_thumbnail
 from app.services.photo_checks import check_photo, extract_focal_length_35mm
+from app.services.photo_station_store import PhotoStationStore
 from app.services.polygon_scaler import PolygonScaler, ScaledFingerHole, ScaledPolygon
 from app.services.project_service import (
     add_bin_to_project,
@@ -103,6 +116,7 @@ validate_tracer_ids(settings.available_tracers)
 # per-user store registry
 _store_cache: dict[str, tuple[SessionStore, ToolStore, BinStore]] = {}
 _project_store_cache: dict[str, ProjectStore] = {}
+_photo_station_store_cache: dict[str, PhotoStationStore] = {}
 
 # serialises store creation against user deletion so a store cannot be
 # built from files that are mid-rmtree (issue #160). locks are never
@@ -138,6 +152,20 @@ def get_project_store(user_id: str) -> ProjectStore:
         return _project_store_cache[user_id]
 
 
+def get_photo_station_store(user_id: str) -> PhotoStationStore:
+    with user_lock(user_id):
+        if user_id not in _photo_station_store_cache:
+            user_path = settings.storage_path / user_id
+            ensure_user_dirs(user_path)
+            _photo_station_store_cache[user_id] = PhotoStationStore(user_path)
+        return _photo_station_store_cache[user_id]
+
+
+def _require_photo_stations_enabled():
+    if not settings.photo_stations:
+        raise HTTPException(status_code=404, detail="photo stations not found")
+
+
 def _user_path(user_id: str) -> Path:
     # defence-in-depth: even if get_user_id is bypassed, block escaping storage root
     result = (settings.storage_path / user_id).resolve()
@@ -148,6 +176,32 @@ def _user_path(user_id: str) -> Path:
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif"}
 MAX_UPLOAD_DIM = 2048
+CAPTURE_CROP_ORIGIN_TOLERANCE = 0.001
+CAPTURE_CROP_SIZE_TOLERANCE = 0.001
+CAPTURE_CROP_MAX_BOUND = 1.0 + CAPTURE_CROP_SIZE_TOLERANCE
+
+
+def _is_full_capture_crop(crop: CaptureCrop | None) -> bool:
+    if crop is None:
+        return True
+    return (
+        crop.x <= CAPTURE_CROP_ORIGIN_TOLERANCE
+        and crop.y <= CAPTURE_CROP_ORIGIN_TOLERANCE
+        and crop.width >= 1.0 - CAPTURE_CROP_SIZE_TOLERANCE
+        and crop.height >= 1.0 - CAPTURE_CROP_SIZE_TOLERANCE
+    )
+
+
+def _parse_capture_crop(value: str | None) -> CaptureCrop | None:
+    if not value:
+        return None
+    try:
+        crop = CaptureCrop.model_validate(json.loads(value))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid capture area") from exc
+    if crop.x + crop.width > CAPTURE_CROP_MAX_BOUND or crop.y + crop.height > CAPTURE_CROP_MAX_BOUND:
+        raise HTTPException(status_code=400, detail="capture area is outside the image")
+    return crop
 
 
 image_processor = ImageProcessor()
@@ -192,7 +246,7 @@ stl_generator = ManifoldSTLGenerator()
 
 def _rel(abs_path: str | Path, user_path: Path) -> str:
     """store path relative to storage root (includes user_id prefix)"""
-    return str(Path(abs_path).resolve().relative_to(Path(settings.storage_path).resolve()))
+    return Path(abs_path).resolve().relative_to(Path(settings.storage_path).resolve()).as_posix()
 
 
 def _abs(rel_path: str | None) -> str | None:
@@ -200,6 +254,125 @@ def _abs(rel_path: str | None) -> str | None:
     if not rel_path:
         return None
     return str(settings.storage_path / rel_path)
+
+
+def _safe_unlink(rel_path: str | None):
+    abs_path = _abs(rel_path)
+    if abs_path:
+        Path(abs_path).unlink(missing_ok=True)
+
+
+def _copy_station_image(user_id: str, source_path: str | Path | None, station_id: str) -> str | None:
+    if not source_path:
+        return None
+    source = Path(source_path)
+    if not source.exists():
+        return None
+
+    up = _user_path(user_id)
+    station_dir = up / "station-photos"
+    station_dir.mkdir(parents=True, exist_ok=True)
+    target = station_dir / f"{station_id}{source.suffix}"
+    shutil.copy2(source, target)
+    return _rel(target, up)
+
+
+MAX_STATION_DIMENSION_DELTA_PERCENT = 2.0
+STATION_DRIFT_WARNING_PERCENT = 1.5
+
+
+def _image_dimensions(content: bytes) -> tuple[int, int]:
+    img = Image.open(io.BytesIO(content))
+    return img.size
+
+
+def _session_image_dimensions(session: Session) -> tuple[int, int]:
+    if not session.original_image_width or not session.original_image_height:
+        raise HTTPException(status_code=400, detail="session has no upload dimensions")
+    return session.original_image_width, session.original_image_height
+
+
+def _create_photo_station(
+    user_id: str,
+    session: Session,
+    name: str,
+    paper_size: str | None,
+    corners: list[Point] | None,
+    source_image_path: str | Path | None = None,
+) -> PhotoStation:
+    if not corners or len(corners) != 4 or not paper_size:
+        raise HTTPException(status_code=400, detail="session must have confirmed corners")
+
+    image_width, image_height = _session_image_dimensions(session)
+    now = _now_iso()
+    station_id = str(uuid.uuid4())
+    source_image = source_image_path or _abs(session.original_image_path)
+    station = PhotoStation(
+        id=station_id,
+        name=name.strip() or f"Station {now[:10]}",
+        image_width=image_width,
+        image_height=image_height,
+        image_path=_copy_station_image(user_id, source_image, station_id),
+        capture_crop=session.capture_crop,
+        paper_size=paper_size,
+        corners=corners,
+        created_at=now,
+        updated_at=now,
+    )
+    get_photo_station_store(user_id).set(station.id, station)
+    return station
+
+
+def _dimension_delta_percent(station_value: int, session_value: int) -> float:
+    if station_value <= 0:
+        return 100.0
+    return abs(session_value - station_value) / station_value * 100.0
+
+
+def _scaled_station_corners(station: PhotoStation, image_width: int, image_height: int) -> list[Point]:
+    sx = image_width / station.image_width
+    sy = image_height / station.image_height
+    return [Point(x=p.x * sx, y=p.y * sy) for p in station.corners]
+
+
+def _station_suggestion(station: PhotoStation, session: Session) -> PhotoStationSuggestion:
+    image_width, image_height = _session_image_dimensions(session)
+    width_delta = _dimension_delta_percent(station.image_width, image_width)
+    height_delta = _dimension_delta_percent(station.image_height, image_height)
+    max_delta = max(width_delta, height_delta)
+    match_status = "exact" if width_delta == 0 and height_delta == 0 else "near" if max_delta <= MAX_STATION_DIMENSION_DELTA_PERCENT else "far"
+
+    warnings: list[str] = []
+    if match_status == "near":
+        warnings.append("Image size differs from the saved station. Check corners before continuing.")
+    elif match_status == "far":
+        warnings.append("Image size differs too much from the saved station.")
+
+    max_corner_drift_px: float | None = None
+    max_corner_drift_percent: float | None = None
+    if session.corners and len(session.corners) == 4:
+        scaled = _scaled_station_corners(station, image_width, image_height)
+        deltas = [
+            math.hypot(detected.x - saved.x, detected.y - saved.y)
+            for detected, saved in zip(session.corners, scaled)
+        ]
+        max_corner_drift_px = max(deltas) if deltas else 0.0
+        diagonal = math.hypot(image_width, image_height)
+        max_corner_drift_percent = (max_corner_drift_px / diagonal * 100.0) if diagonal else 0.0
+        if max_corner_drift_percent >= STATION_DRIFT_WARNING_PERCENT:
+            warnings.append("Detected paper corners differ from this station.")
+    elif session.corners is None:
+        warnings.append("No paper was detected in this upload. Reused corners must be checked manually.")
+
+    return PhotoStationSuggestion(
+        station=station,
+        match_status=match_status,
+        width_delta_percent=round(width_delta, 3),
+        height_delta_percent=round(height_delta, 3),
+        max_corner_drift_px=round(max_corner_drift_px, 2) if max_corner_drift_px is not None else None,
+        max_corner_drift_percent=round(max_corner_drift_percent, 3) if max_corner_drift_percent is not None else None,
+        warnings=warnings,
+    )
 
 
 def _translate_points(points: list[Point], dx: float, dy: float) -> list[Point]:
@@ -339,7 +512,7 @@ def _tool_image_context(tool: Tool, sessions: SessionStore, load_missing_dimensi
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _build_bin_from_tools(
@@ -517,7 +690,13 @@ def _run_generate(
 
 
 @router.post("/upload", response_model=UploadResponse)
-async def upload_image(request: Request, image: UploadFile, user_id: str = Depends(get_user_id)):
+async def upload_image(
+    request: Request,
+    image: UploadFile = File(...),
+    station_id: str | None = Form(None),
+    capture_crop: str | None = Form(None),
+    user_id: str = Depends(get_user_id),
+):
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="file must be an image")
 
@@ -529,6 +708,9 @@ async def upload_image(request: Request, image: UploadFile, user_id: str = Depen
     if ext not in ALLOWED_IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="unsupported image format")
 
+    if station_id or capture_crop:
+        _require_photo_stations_enabled()
+
     max_bytes = settings.max_upload_mb * 1024 * 1024
     content = await image.read()
     if len(content) > max_bytes:
@@ -537,33 +719,72 @@ async def upload_image(request: Request, image: UploadFile, user_id: str = Depen
     # exif is dropped when the image is re-encoded, so read it first
     focal_length = extract_focal_length_35mm(content)
 
-    content, ext, _ = ingest_image(content, ext, MAX_UPLOAD_DIM)
+    station = None
+    if station_id:
+        station = get_photo_station_store(user_id).get(station_id)
+        if not station:
+            raise HTTPException(status_code=404, detail="photo station not found")
+
+    requested_crop = _parse_capture_crop(capture_crop)
+    applied_crop = requested_crop if requested_crop is not None else station.capture_crop if station else None
+
+    ingest_crop = None if _is_full_capture_crop(applied_crop) else applied_crop
+    content, ext, _ = ingest_image(content, ext, MAX_UPLOAD_DIM, capture_crop=ingest_crop)
+    image_width, image_height = _image_dimensions(content)
     image_path = up / "uploads" / f"{session_id}{ext}"
+
+    paper_size = None
+    applied_station_id = None
+    if station:
+        width_delta = _dimension_delta_percent(station.image_width, image_width)
+        height_delta = _dimension_delta_percent(station.image_height, image_height)
+        if max(width_delta, height_delta) > MAX_STATION_DIMENSION_DELTA_PERCENT:
+            raise HTTPException(status_code=400, detail="photo station image size differs too much from this upload")
+
+        corner_points = _scaled_station_corners(station, image_width, image_height)
+        paper_size = station.paper_size
+        applied_station_id = station.id
+
     # the awaited read can outlive a concurrent account deletion; refuse
     # to write into the deleted user's tree
     user_sessions.ensure_open()
     image_path.write_bytes(content)
 
-    corners = image_processor.detect_paper_corners(str(image_path))
-    corner_points = [Point(x=c[0], y=c[1]) for c in corners] if corners else None
+    if station:
+        station.last_used_at = _now_iso()
+        get_photo_station_store(user_id).set(station.id, station)
+    else:
+        corners = image_processor.detect_paper_corners(str(image_path))
+        corner_points = [Point(x=c[0], y=c[1]) for c in corners] if corners else None
 
     user_sessions.set(session_id, Session(
         id=session_id,
-        created_at=datetime.utcnow().isoformat(),
+        created_at=_now_iso(),
         original_image_path=_rel(image_path, up),
+        original_image_width=image_width,
+        original_image_height=image_height,
+        capture_crop=None if _is_full_capture_crop(applied_crop) else applied_crop,
         corners=corner_points,
         focal_length_35mm=focal_length,
+        paper_size=paper_size,
     ))
 
     return UploadResponse(
         session_id=session_id,
         image_url=f"/storage/{user_id}/uploads/{session_id}{ext}",
         detected_corners=corner_points,
+        image_width=image_width,
+        image_height=image_height,
+        corner_source="station" if applied_station_id else "detected" if corner_points else "none",
+        station_id=applied_station_id,
     )
 
 
 @router.post("/sessions/{session_id}/corners", response_model=CornersResponse)
 async def set_corners(request: Request, session_id: str, req: CornersRequest, user_id: str = Depends(get_user_id)):
+    if req.save_station_name is not None:
+        _require_photo_stations_enabled()
+
     user_sessions, _, _ = get_stores(user_id)
     session = user_sessions.get(session_id)
     if not session or not session.original_image_path:
@@ -595,12 +816,23 @@ async def set_corners(request: Request, session_id: str, req: CornersRequest, us
     if ds_ratio < 1.0:
         scale_factor /= ds_ratio
 
-    # original upload is no longer needed
-    orig = _abs(session.original_image_path)
-    if orig:
-        Path(orig).unlink(missing_ok=True)
-
     up = _user_path(user_id)
+    orig_path = _abs(session.original_image_path)
+    created_station: PhotoStation | None = None
+    if req.save_station_name is not None:
+        created_station = _create_photo_station(
+            user_id=user_id,
+            session=session,
+            name=req.save_station_name,
+            paper_size=req.paper_size,
+            corners=req.corners,
+            source_image_path=orig_path,
+        )
+
+    # original upload is no longer needed for tracing; saved stations own their previews.
+    if orig_path:
+        Path(orig_path).unlink(missing_ok=True)
+
     session.corrected_image_path = _rel(output_path, up)
     session.original_image_path = None
     session.corners = req.corners
@@ -613,6 +845,160 @@ async def set_corners(request: Request, session_id: str, req: CornersRequest, us
         corrected_image_url=f"/storage/{session.corrected_image_path}",
         scale_factor=scale_factor,
         warnings=photo_warnings,
+        station=created_station,
+    )
+
+
+@router.post("/sessions/{session_id}/redetect-corners", response_model=RedetectCornersResponse)
+async def redetect_corners(request: Request, session_id: str, user_id: str = Depends(get_user_id)):
+    _require_photo_stations_enabled()
+
+    user_sessions, _, _ = get_stores(user_id)
+    session = user_sessions.get(session_id)
+    if not session or not session.original_image_path:
+        raise HTTPException(status_code=404, detail="session original image not found")
+
+    detected = image_processor.detect_paper_corners(_abs(session.original_image_path))
+    if not detected:
+        raise HTTPException(status_code=422, detail="paper corners not detected")
+
+    corners = [Point(x=c[0], y=c[1]) for c in detected]
+    session.corners = corners
+    user_sessions.set(session_id, session)
+    return RedetectCornersResponse(corners=corners)
+
+
+@router.get("/photo-stations", response_model=PhotoStationListResponse)
+async def list_photo_stations(request: Request, user_id: str = Depends(get_user_id)):
+    _require_photo_stations_enabled()
+
+    store = get_photo_station_store(user_id)
+    stations = list(store.all().values())
+    stations.sort(key=lambda s: s.updated_at or s.created_at or "", reverse=True)
+    return PhotoStationListResponse(stations=stations)
+
+
+@router.get("/photo-stations/{station_id}", response_model=PhotoStation)
+async def get_photo_station(request: Request, station_id: str, user_id: str = Depends(get_user_id)):
+    _require_photo_stations_enabled()
+
+    station = get_photo_station_store(user_id).get(station_id)
+    if not station:
+        raise HTTPException(status_code=404, detail="photo station not found")
+    return station
+
+
+@router.post("/photo-stations", response_model=PhotoStation)
+async def create_photo_station(request: Request, req: PhotoStationCreateRequest, user_id: str = Depends(get_user_id)):
+    _require_photo_stations_enabled()
+
+    user_sessions, _, _ = get_stores(user_id)
+    session = user_sessions.get(req.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    station = _create_photo_station(
+        user_id=user_id,
+        session=session,
+        name=req.name,
+        paper_size=req.paper_size or session.paper_size,
+        corners=req.corners or session.corners,
+    )
+    return station
+
+
+@router.patch("/photo-stations/{station_id}", response_model=PhotoStation)
+async def update_photo_station(request: Request, station_id: str, req: PhotoStationUpdateRequest, user_id: str = Depends(get_user_id)):
+    _require_photo_stations_enabled()
+
+    store = get_photo_station_store(user_id)
+    station = store.get(station_id)
+    if not station:
+        raise HTTPException(status_code=404, detail="photo station not found")
+
+    if req.name is not None:
+        station.name = req.name.strip() or station.name
+    if req.paper_size is not None:
+        station.paper_size = req.paper_size
+    if req.corners is not None:
+        if len(req.corners) != 4:
+            raise HTTPException(status_code=400, detail="station corners must contain four points")
+        station.corners = req.corners
+    station.updated_at = _now_iso()
+    store.set(station.id, station)
+    return station
+
+
+@router.delete("/photo-stations/{station_id}", response_model=StatusResponse)
+async def delete_photo_station(request: Request, station_id: str, user_id: str = Depends(get_user_id)):
+    _require_photo_stations_enabled()
+
+    station = get_photo_station_store(user_id).delete(station_id)
+    if not station:
+        raise HTTPException(status_code=404, detail="photo station not found")
+    _safe_unlink(station.image_path)
+    return StatusResponse(status="deleted")
+
+
+@router.get("/sessions/{session_id}/station-suggestions", response_model=PhotoStationSuggestionsResponse)
+async def list_photo_station_suggestions(request: Request, session_id: str, user_id: str = Depends(get_user_id)):
+    _require_photo_stations_enabled()
+
+    user_sessions, _, _ = get_stores(user_id)
+    session = user_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    stations = list(get_photo_station_store(user_id).all().values())
+    if not session.original_image_width or not session.original_image_height:
+        return PhotoStationSuggestionsResponse(suggestions=[], station_count=len(stations))
+
+    suggestions = [
+        _station_suggestion(station, session)
+        for station in stations
+    ]
+    suggestions = [suggestion for suggestion in suggestions if suggestion.match_status != "far"]
+    suggestions.sort(
+        key=lambda suggestion: max(
+            suggestion.width_delta_percent,
+            suggestion.height_delta_percent,
+            suggestion.max_corner_drift_percent or 0.0,
+        )
+    )
+    return PhotoStationSuggestionsResponse(suggestions=suggestions, station_count=len(stations))
+
+
+@router.post("/sessions/{session_id}/reuse-corners", response_model=ReuseCornersResponse)
+async def reuse_photo_station_corners(request: Request, session_id: str, req: ReuseCornersRequest, user_id: str = Depends(get_user_id)):
+    _require_photo_stations_enabled()
+
+    user_sessions, _, _ = get_stores(user_id)
+    session = user_sessions.get(session_id)
+    if not session or not session.original_image_path:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    store = get_photo_station_store(user_id)
+    station = store.get(req.station_id)
+    if not station:
+        raise HTTPException(status_code=404, detail="photo station not found")
+
+    suggestion = _station_suggestion(station, session)
+    if suggestion.match_status == "far":
+        raise HTTPException(status_code=400, detail="photo station image size differs too much from this upload")
+
+    image_width, image_height = _session_image_dimensions(session)
+    reused_corners = _scaled_station_corners(station, image_width, image_height)
+    session.corners = reused_corners
+    session.paper_size = station.paper_size
+    user_sessions.set(session_id, session)
+
+    station.last_used_at = _now_iso()
+    store.set(station.id, station)
+
+    return ReuseCornersResponse(
+        corners=reused_corners,
+        paper_size=station.paper_size,
+        suggestion=suggestion,
     )
 
 
@@ -643,6 +1029,7 @@ async def get_available_keys(request: Request):
             {"id": t, "label": TRACER_LABELS.get(t, t)}
             for t in tracers
         ],
+        "photo_stations": settings.photo_stations,
     }
 
 
@@ -716,7 +1103,10 @@ async def trace_tools(
     if mask_path:
         mask_url = f"/storage/{user_id}/processed/{session_id}_mask.png"
 
-    return TraceResponse(polygons=polygons, mask_url=mask_url)
+    return TraceResponse(
+        polygons=polygons,
+        mask_url=mask_url,
+    )
 
 
 @router.post("/sessions/{session_id}/trace-mask", response_model=TraceResponse)
@@ -770,7 +1160,7 @@ async def trace_from_mask(
 
     return TraceResponse(
         polygons=polygons,
-        mask_url=f"/storage/{user_id}/processed/{session_id}_mask.png"
+        mask_url=f"/storage/{user_id}/processed/{session_id}_mask.png",
     )
 
 
@@ -883,11 +1273,10 @@ async def delete_session(request: Request, session_id: str, user_id: str = Depen
     for rel in [
         session.original_image_path,
         session.corrected_image_path,
+        session.mask_image_path,
         session.stl_path,
     ]:
-        p = _abs(rel)
-        if p:
-            Path(p).unlink(missing_ok=True)
+        _safe_unlink(rel)
 
     if session.stl_path:
         Path(_abs(session.stl_path)).with_suffix(".3mf").unlink(missing_ok=True)
@@ -1187,7 +1576,7 @@ async def save_tools_from_session(request: Request, session_id: str, body: SaveT
                 if source_transform else None
             ),
             thumbnail_path=thumbnail_path,
-            created_at=datetime.utcnow().isoformat(),
+            created_at=_now_iso(),
         ))
         tool_ids.append(tool_id)
 

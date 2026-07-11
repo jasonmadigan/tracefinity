@@ -4,6 +4,7 @@ import io
 import pytest
 from PIL import Image
 
+from app.models.schemas import CaptureCrop
 from app.services.image_ingest import ingest_image
 
 
@@ -89,3 +90,21 @@ class TestDownscale:
         img = _open(out)
         assert (img.width, img.height) == (2402, 3300)
         assert ratio == 1.0
+
+    def test_crop_happens_before_downscale(self):
+        img = Image.new("RGB", (4032, 3024), "green")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+
+        out, ext, ratio = ingest_image(
+            buf.getvalue(),
+            ".png",
+            max_dim=2048,
+            capture_crop=CaptureCrop(x=0, y=0, width=0.5, height=1),
+        )
+
+        cropped = _open(out)
+        assert ext == ".png"
+        assert cropped.height == 2048
+        assert cropped.width == round(2016 * (2048 / 3024))
+        assert ratio == pytest.approx(2048 / 3024)
