@@ -5,6 +5,13 @@ export interface Point {
 
 export type PaperSize = 'a4' | 'letter' | 'a3' | 'tabloid'
 
+export interface CaptureCrop {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface FingerHole {
   id: string
   x: number
@@ -89,6 +96,20 @@ export interface CornersResponse {
   corrected_image_url: string
   scale_factor: number
   warnings: PhotoWarning[]
+}
+
+export interface PhotoStation {
+  id: string
+  name: string
+  image_width: number
+  image_height: number
+  image_path: string | null
+  capture_crop: CaptureCrop | null
+  paper_size: PaperSize
+  corners: Point[]
+  created_at: string | null
+  updated_at: string | null
+  last_used_at: string | null
 }
 
 export interface TraceResponse {

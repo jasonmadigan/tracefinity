@@ -1,6 +1,7 @@
 import type {
   UploadResponse,
   CornersResponse,
+  PhotoStation,
   TraceResponse,
   GenerateResponse,
   Point,
@@ -74,7 +75,7 @@ export async function uploadImage(file: File): Promise<UploadResponse> {
 export async function setCorners(
   sessionId: string,
   corners: Point[],
-  paperSize: PaperSize
+  paperSize: PaperSize,
 ): Promise<CornersResponse> {
   return fetchApi(`/api/sessions/${sessionId}/corners`, {
     method: 'POST',
@@ -87,7 +88,13 @@ export interface TracerInfo {
   label: string
 }
 
-export async function getAvailableKeys(): Promise<{ google: boolean; provider: string | null; provider_label: string | null; tracers: TracerInfo[] }> {
+export async function getAvailableKeys(): Promise<{
+  google: boolean
+  provider: string | null
+  provider_label: string | null
+  tracers: TracerInfo[]
+  photo_stations: boolean
+}> {
   return fetchApi('/api/api-keys')
 }
 
@@ -300,6 +307,33 @@ export async function removeToolFromProject(projectId: string, toolId: string): 
 
 export async function getProjectHealth(projectId: string): Promise<ProjectHealthResponse> {
   return fetchApi(`/api/bin-projects/${projectId}/health`)
+}
+
+export async function listPhotoStations(): Promise<PhotoStation[]> {
+  const res = await fetchApi<{ stations: PhotoStation[] }>('/api/photo-stations')
+  return res.stations
+}
+
+export async function getPhotoStation(stationId: string): Promise<PhotoStation> {
+  return fetchApi(`/api/photo-stations/${stationId}`)
+}
+
+export async function updatePhotoStation(
+  stationId: string,
+  updates: {
+    name?: string
+    paper_size?: PaperSize
+    corners?: Point[]
+  }
+): Promise<PhotoStation> {
+  return fetchApi(`/api/photo-stations/${stationId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  })
+}
+
+export async function deletePhotoStation(stationId: string): Promise<void> {
+  await fetchApi(`/api/photo-stations/${stationId}`, { method: 'DELETE' })
 }
 
 export async function repairProject(projectId: string): Promise<ProjectHealthResponse> {
