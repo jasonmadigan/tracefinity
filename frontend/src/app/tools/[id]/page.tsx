@@ -201,6 +201,7 @@ export default function ToolPage() {
 
       {/* editor fills the entire area */}
       <ToolEditor
+        key={toolId}
         points={tool.points}
         fingerHoles={tool.finger_holes}
         interiorRings={tool.interior_rings}
