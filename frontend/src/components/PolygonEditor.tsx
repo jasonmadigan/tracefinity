@@ -1,10 +1,12 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { Point, Polygon } from '@/types'
 import { Undo2, Redo2, Trash2, Plus, Minus, Move } from 'lucide-react'
 import { polygonPathData } from '@/lib/svg'
 import { useHistory } from '@/hooks/useHistory'
+import { ZOOM_FACTOR } from '@/lib/constants'
+import { clampZoom, zoomedViewBox, viewBoxPoint, zoomAtCursor } from '@/lib/viewbox'
 
 interface Props {
   imageUrl: string
@@ -22,6 +24,7 @@ const BASE_VIEW_WIDTH = 800
 type EditMode = 'select' | 'vertex' | 'add-vertex' | 'delete-vertex'
 type DragState =
   | { type: 'vertex'; polyId: string; pointIdx: number }
+  | { type: 'pan'; startClientX: number; startClientY: number; origPanX: number; origPanY: number; svgScale: number }
   | null
 
 export function PolygonEditor({
@@ -38,8 +41,17 @@ export function PolygonEditor({
   const containerRef = useRef<HTMLDivElement>(null)
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
   const [fitted, setFitted] = useState({ width: 0, height: 0 })
-  // scale UI elements relative to image size so they're visible on large photos
-  const uiScale = imageSize.width > 0 ? imageSize.width / BASE_VIEW_WIDTH : 1
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const spaceHeld = useRef(false)
+  const didPanRef = useRef(false)
+  const zoomRef = useRef(zoom)
+  const panRef = useRef(pan)
+  useEffect(() => { zoomRef.current = zoom }, [zoom])
+  useEffect(() => { panRef.current = pan }, [pan])
+  // scale UI elements relative to image size so they're visible on large photos;
+  // divided by zoom so handles and strokes keep a constant on-screen size
+  const uiScale = (imageSize.width > 0 ? imageSize.width / BASE_VIEW_WIDTH : 1) / zoom
 
   // active polygon for vertex editing (internal)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -97,29 +109,84 @@ export function PolygonEditor({
   useEffect(() => { polygonsRef.current = polygons }, [polygons])
   useEffect(() => { onPolygonsChangeRef.current = onPolygonsChange }, [onPolygonsChange])
 
+  // container is aspect-fitted to the image, so client fractions map straight into the viewBox
+  const vb = useMemo(
+    () => zoomedViewBox(imageSize.width, imageSize.height, zoom, pan),
+    [imageSize, zoom, pan]
+  )
+
   const getScaledPoint = useCallback(
     (clientX: number, clientY: number): Point => {
       if (!containerRef.current) return { x: 0, y: 0 }
 
       const rect = containerRef.current.getBoundingClientRect()
-      const scaleX = imageSize.width / rect.width
-      const scaleY = imageSize.height / rect.height
+      const point = viewBoxPoint(vb, (clientX - rect.left) / rect.width, (clientY - rect.top) / rect.height)
 
       return {
-        x: Math.max(0, Math.min(imageSize.width, (clientX - rect.left) * scaleX)),
-        y: Math.max(0, Math.min(imageSize.height, (clientY - rect.top) * scaleY)),
+        x: Math.max(0, Math.min(imageSize.width, point.x)),
+        y: Math.max(0, Math.min(imageSize.height, point.y)),
       }
     },
-    [imageSize]
+    [imageSize, vb]
   )
+
+  // scroll-to-zoom centred on the cursor (needs passive: false for preventDefault)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !imageSize.width) return
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const factor = e.deltaY < 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR
+      const oldZoom = zoomRef.current
+      const newZoom = clampZoom(oldZoom * factor)
+      if (newZoom === oldZoom) return
+      const rect = el.getBoundingClientRect()
+      const fx = (e.clientX - rect.left) / rect.width
+      const fy = (e.clientY - rect.top) / rect.height
+      setPan(zoomAtCursor(imageSize.width, imageSize.height, oldZoom, newZoom, panRef.current, fx, fy))
+      setZoom(newZoom)
+    }
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [imageSize])
+
+  // space key for pan mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        spaceHeld.current = true
+      }
+    }
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spaceHeld.current = false
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [])
 
   const updatePolygons = useCallback((updated: Polygon[]) => {
     pushHistory(updated)
     onPolygonsChange(updated)
   }, [pushHistory, onPolygonsChange])
 
+  // swallow the click that follows a pan release
+  const consumeDidPan = () => {
+    if (didPanRef.current) {
+      didPanRef.current = false
+      return true
+    }
+    return false
+  }
+
   const handlePolygonClick = (id: string) => (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (consumeDidPan()) return
     if (!editable) return
 
     if (editMode !== 'select') {
@@ -146,6 +213,7 @@ export function PolygonEditor({
 
   const handleEdgeClick = (polyId: string, edgeIdx: number) => (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (consumeDidPan()) return
     if (!editable || editMode !== 'add-vertex') return
 
     const point = getScaledPoint(e.clientX, e.clientY)
@@ -160,6 +228,7 @@ export function PolygonEditor({
 
   const handleVertexClick = (polyId: string, pointIdx: number) => (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (consumeDidPan()) return
     if (!editable) return
 
     if (editMode === 'delete-vertex') {
@@ -177,6 +246,8 @@ export function PolygonEditor({
   }
 
   const handleVertexMouseDown = (polyId: string, pointIdx: number) => (e: React.MouseEvent) => {
+    // let pan triggers bubble to the canvas handler
+    if (spaceHeld.current || e.button !== 0) return
     e.stopPropagation()
     if (editable && (editMode === 'vertex' || editMode === 'select')) {
       setDragging({ type: 'vertex', polyId, pointIdx })
@@ -194,6 +265,14 @@ export function PolygonEditor({
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
       if (!dragging) return
+
+      if (dragging.type === 'pan') {
+        const dx = (e.clientX - dragging.startClientX) / dragging.svgScale
+        const dy = (e.clientY - dragging.startClientY) / dragging.svgScale
+        setPan({ x: dragging.origPanX - dx, y: dragging.origPanY - dy })
+        didPanRef.current = true
+        return
+      }
 
       const point = getScaledPoint(e.clientX, e.clientY)
 
@@ -231,14 +310,15 @@ export function PolygonEditor({
   )
 
   const handleMouseUp = useCallback(() => {
-    if (dragging) {
+    // pan never touches the polygons, so it never enters history
+    if (dragging && dragging.type !== 'pan') {
       pushHistory(polygonsRef.current)
     }
     setDragging(null)
   }, [dragging, pushHistory])
 
   const handleTouchEnd = useCallback(() => {
-    if (dragging) {
+    if (dragging && dragging.type !== 'pan') {
       pushHistory(polygonsRef.current)
     }
     setDragging(null)
@@ -260,7 +340,31 @@ export function PolygonEditor({
   }, [dragging, handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd])
 
   const handleBackgroundClick = () => {
+    if (consumeDidPan()) return
     setActiveId(null)
+  }
+
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    const isPanTrigger = e.button === 1 || (e.button === 0 && spaceHeld.current)
+    if (!isPanTrigger) return
+    // preventDefault suppresses middle-mouse autoscroll
+    e.preventDefault()
+    if (!containerRef.current || !imageSize.width) return
+    const rect = containerRef.current.getBoundingClientRect()
+    const svgScale = rect.width / (imageSize.width / zoom)
+    setDragging({
+      type: 'pan',
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      origPanX: pan.x,
+      origPanY: pan.y,
+      svgScale,
+    })
+  }
+
+  const handleResetZoom = () => {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
   }
 
   const handleDeletePolygon = (id: string) => {
@@ -375,21 +479,26 @@ export function PolygonEditor({
       <div ref={wrapperRef} className="flex-1 min-h-0 flex items-center justify-center">
         <div
           ref={containerRef}
-          className="relative bg-inset rounded-lg overflow-hidden"
+          className={`relative bg-inset rounded-lg overflow-hidden ${dragging?.type === 'pan' ? 'cursor-grabbing' : ''}`}
           style={fitted.width ? { width: fitted.width, height: fitted.height } : { width: '100%', aspectRatio: `${imageSize.width} / ${imageSize.height}` }}
           onClick={handleBackgroundClick}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseDownCapture={() => { didPanRef.current = false }}
         >
-        <img
-          src={imageUrl}
-          alt="Corrected"
-          className="w-full h-full pointer-events-none"
-          draggable={false}
-        />
-
         <svg
-          className="absolute inset-0 w-full h-full"
-          viewBox={`0 0 ${imageSize.width} ${imageSize.height}`}
+          className={`absolute inset-0 w-full h-full ${dragging?.type === 'pan' ? 'pointer-events-none' : ''}`}
+          viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
         >
+          {/* photo lives inside the svg so it zooms and pans with the polygons */}
+          <image
+            href={imageUrl}
+            x={0}
+            y={0}
+            width={imageSize.width}
+            height={imageSize.height}
+            preserveAspectRatio="none"
+            className="pointer-events-none select-none"
+          />
           {polygons.map((poly) => {
             const isActive = activeId === poly.id
             const polyIncluded = isIncluded(poly.id)
@@ -491,6 +600,34 @@ export function PolygonEditor({
             )
           })}
         </svg>
+
+        {/* zoom controls */}
+        <div
+          className="absolute bottom-3.5 right-3.5 z-20 glass-toolbar px-1 py-0.5 flex items-center gap-0.5 text-[11px]"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => setZoom(z => clampZoom(z / ZOOM_FACTOR))}
+            className="px-2 py-1 rounded-[7px] text-text-muted hover:text-text-primary hover:bg-border/50 transition-colors"
+          >
+            -
+          </button>
+          <span className="px-1.5 text-text-secondary min-w-[36px] text-center">{Math.round(zoom * 100)}%</span>
+          <button
+            onClick={() => setZoom(z => clampZoom(z * ZOOM_FACTOR))}
+            className="px-2 py-1 rounded-[7px] text-text-muted hover:text-text-primary hover:bg-border/50 transition-colors"
+          >
+            +
+          </button>
+          <div className="h-3.5 w-px bg-border-subtle mx-0.5" />
+          <button
+            onClick={handleResetZoom}
+            className="px-2 py-1 rounded-[7px] text-text-muted hover:text-text-primary hover:bg-border/50 transition-colors"
+          >
+            Fit
+          </button>
+        </div>
         </div>
       </div>
 
