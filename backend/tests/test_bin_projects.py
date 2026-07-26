@@ -1,4 +1,6 @@
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 import app.api.routes as routes
 from app.config import ensure_user_dirs, settings
@@ -13,6 +15,8 @@ from app.models.schemas import (
     BinProjectToolsRequest,
     BinProjectUpdateRequest,
     PlacedTool,
+    ProjectBinPlacement,
+    ProjectSketch,
     Tool,
 )
 from app.services.bin_store import BinStore
@@ -31,8 +35,7 @@ def test_old_project_records_get_defaults():
     assert project.tool_ids == []
     assert project.bin_ids == []
     assert project.status == "active"
-    assert project.target_grid_x is None
-    assert project.target_grid_y is None
+    assert project.sketches == []
     assert project.default_bin_config is None
     assert project.notes is None
 
@@ -45,8 +48,7 @@ def test_project_metadata_round_trips():
         "status": "ready_to_print",
         "tool_ids": ["tool-1", "tool-2"],
         "bin_ids": ["bin-1"],
-        "target_grid_x": 4,
-        "target_grid_y": 5,
+        "sketches": [{"id": "sketch-1", "name": "Top drawer", "target_grid_x": 4, "target_grid_y": 5}],
         "default_bin_config": {"grid_x": 3, "grid_y": 2},
         "notes": "print first bin as test",
         "created_at": "2026-05-10T00:00:00",
@@ -57,7 +59,8 @@ def test_project_metadata_round_trips():
     assert data["tool_ids"] == ["tool-1", "tool-2"]
     assert data["bin_ids"] == ["bin-1"]
     assert data["status"] == "ready_to_print"
-    assert data["target_grid_x"] == 4
+    assert data["sketches"][0]["target_grid_x"] == 4
+    assert data["sketches"][0]["name"] == "Top drawer"
     assert data["default_bin_config"]["grid_x"] == 3
     assert data["notes"] == "print first bin as test"
 
@@ -68,7 +71,7 @@ def test_project_requests_support_clearable_fields():
         tool_ids=["tool-1"],
         default_bin_config=BinConfig(grid_x=4, grid_y=3, magnet_diameter=6.2, bed_size=220),
     )
-    update_req = BinProjectUpdateRequest(description=None, notes=None, target_grid_x=None)
+    update_req = BinProjectUpdateRequest(description=None, notes=None)
     tools_req = BinProjectToolsRequest(tool_ids=["tool-1", "tool-2"])
     bins_req = BinProjectBinsRequest(bin_ids=["bin-1"], import_tools=True)
     bin_req = BinProjectCreateBinRequest(
@@ -83,7 +86,6 @@ def test_project_requests_support_clearable_fields():
     assert create_req.default_bin_config.bed_size == 220
     assert "description" in update_req.model_fields_set
     assert "notes" in update_req.model_fields_set
-    assert "target_grid_x" in update_req.model_fields_set
     assert tools_req.tool_ids == ["tool-1", "tool-2"]
     assert bins_req.import_tools is True
     assert bin_req.tool_ids == ["tool-1"]
@@ -334,3 +336,221 @@ def test_project_health_reports_outside_bin_tools():
     issues = project_health(project, ToolStoreStub(), BinStoreStub())
 
     assert any(issue.code == "outside_tool" and not issue.repairable for issue in issues)
+
+
+def test_project_bin_placement_validates_grid_offsets():
+    placement = ProjectBinPlacement(bin_id="bin-1", x=2.5, y=0, rotation=270)
+
+    assert placement.x == 2.5
+    assert placement.rotation == 270
+    assert placement.id
+    with pytest.raises(ValidationError):
+        ProjectBinPlacement(bin_id="bin-1", x=0.3)
+    with pytest.raises(ValidationError):
+        ProjectBinPlacement(bin_id="bin-1", x=-1)
+    with pytest.raises(ValidationError):
+        ProjectBinPlacement(bin_id="bin-1", rotation=45)
+
+
+def test_project_bin_placement_validates_colour():
+    assert ProjectBinPlacement(bin_id="bin-1", color="#A1B2C3").color == "#a1b2c3"
+    assert ProjectBinPlacement(bin_id="bin-1").color is None
+    with pytest.raises(ValidationError):
+        ProjectBinPlacement(bin_id="bin-1", color="red")
+    with pytest.raises(ValidationError):
+        ProjectBinPlacement(bin_id="bin-1", color="#abc")
+
+
+def test_project_bin_placements_get_distinct_ids():
+    first = ProjectBinPlacement(bin_id="bin-1")
+    second = ProjectBinPlacement(bin_id="bin-1")
+
+    assert first.id != second.id
+
+
+def test_sketch_target_grid_covers_drawer_sized_grids():
+    sketch = ProjectSketch(target_grid_x=12, target_grid_y=7.5)
+
+    assert sketch.target_grid_x == 12
+    assert sketch.target_grid_y == 7.5
+    assert sketch.name == "Drawer plan"
+    with pytest.raises(ValidationError):
+        ProjectSketch(target_grid_x=41)
+
+
+def test_legacy_project_layout_becomes_a_sketch():
+    project = BinProject.model_validate({
+        "id": "project-1",
+        "name": "Top drawer",
+        "target_grid_x": 6,
+        "target_grid_y": 4,
+        "bin_layout": [{"id": "p1", "bin_id": "bin-1", "x": 1, "y": 0, "rotation": 90}],
+        "created_at": "2026-05-10T00:00:00",
+    })
+
+    assert len(project.sketches) == 1
+    sketch = project.sketches[0]
+    assert sketch.name == "Drawer plan"
+    assert sketch.target_grid_x == 6
+    assert sketch.target_grid_y == 4
+    assert [p.bin_id for p in sketch.bin_layout] == ["bin-1"]
+    assert sketch.id
+    assert "target_grid_x" not in project.model_dump()
+
+
+def test_project_without_legacy_layout_stays_empty():
+    project = BinProject.model_validate({"id": "project-1", "name": "Top drawer", "bin_layout": []})
+
+    assert project.sketches == []
+
+
+def test_sketch_layout_round_trips_through_patch(tmp_path, monkeypatch):
+    client = _api_client(tmp_path, monkeypatch)
+    project = client.post("/api/bin-projects", json={"name": "Top drawer"}).json()
+    bin_data = client.post("/api/bins", json={"name": "Bin A", "project_id": project["id"]}).json()
+    sketch = client.post(f"/api/bin-projects/{project['id']}/sketches", json={"name": "Top"}).json()
+
+    resp = client.patch(f"/api/bin-projects/{project['id']}/sketches/{sketch['id']}", json={
+        "target_grid_x": 6,
+        "target_grid_y": 4,
+        "bin_layout": [
+            {"id": "placement-1", "bin_id": bin_data["id"], "x": 1.5, "y": 2, "rotation": 90, "color": "#4ade80"}
+        ],
+    })
+
+    assert resp.status_code == 200
+    assert resp.json()["target_grid_x"] == 6
+    assert resp.json()["bin_layout"] == [
+        {"id": "placement-1", "bin_id": bin_data["id"], "x": 1.5, "y": 2.0, "rotation": 90, "color": "#4ade80"}
+    ]
+    stored = client.get(f"/api/bin-projects/{project['id']}").json()["sketches"][0]
+    assert stored["bin_layout"][0]["x"] == 1.5
+    assert stored["name"] == "Top"
+
+
+def test_project_holds_several_sketches(tmp_path, monkeypatch):
+    client = _api_client(tmp_path, monkeypatch)
+    project = client.post("/api/bin-projects", json={"name": "Top drawer"}).json()
+
+    first = client.post(f"/api/bin-projects/{project['id']}/sketches", json={}).json()
+    second = client.post(f"/api/bin-projects/{project['id']}/sketches", json={"target_grid_x": 8}).json()
+
+    detail = client.get(f"/api/bin-projects/{project['id']}").json()
+    summary = next(p for p in client.get("/api/bin-projects").json()["projects"] if p["id"] == project["id"])
+
+    assert first["name"] == "Drawer plan 1"
+    assert second["name"] == "Drawer plan 2"
+    assert second["target_grid_x"] == 8
+    assert [s["id"] for s in detail["sketches"]] == [first["id"], second["id"]]
+    assert summary["sketch_count"] == 2
+
+    delete_resp = client.delete(f"/api/bin-projects/{project['id']}/sketches/{first['id']}")
+    remaining = client.get(f"/api/bin-projects/{project['id']}").json()["sketches"]
+
+    assert delete_resp.status_code == 200
+    assert [s["id"] for s in remaining] == [second["id"]]
+    assert client.patch(
+        f"/api/bin-projects/{project['id']}/sketches/{first['id']}", json={"name": "gone"}
+    ).status_code == 404
+
+
+def test_sketch_layout_rejects_unlinked_bins_and_duplicate_placement_ids(tmp_path, monkeypatch):
+    client = _api_client(tmp_path, monkeypatch)
+    project = client.post("/api/bin-projects", json={"name": "Top drawer"}).json()
+    linked = client.post("/api/bins", json={"name": "Bin A", "project_id": project["id"]}).json()
+    loose = client.post("/api/bins", json={"name": "Bin B"}).json()
+    sketch = client.post(f"/api/bin-projects/{project['id']}/sketches", json={}).json()
+
+    unlinked_resp = client.patch(f"/api/bin-projects/{project['id']}/sketches/{sketch['id']}", json={
+        "bin_layout": [{"bin_id": loose["id"], "x": 0, "y": 0}],
+    })
+    duplicate_resp = client.patch(f"/api/bin-projects/{project['id']}/sketches/{sketch['id']}", json={
+        "bin_layout": [
+            {"id": "same", "bin_id": linked["id"], "x": 0, "y": 0},
+            {"id": "same", "bin_id": linked["id"], "x": 1, "y": 0},
+        ],
+    })
+
+    assert unlinked_resp.status_code == 400
+    assert duplicate_resp.status_code == 400
+    assert client.get(f"/api/bin-projects/{project['id']}").json()["sketches"][0]["bin_layout"] == []
+
+
+def test_sketch_layout_allows_the_same_bin_more_than_once(tmp_path, monkeypatch):
+    client = _api_client(tmp_path, monkeypatch)
+    project = client.post("/api/bin-projects", json={"name": "Top drawer"}).json()
+    bin_data = client.post("/api/bins", json={"name": "Bin A", "project_id": project["id"]}).json()
+    sketch = client.post(f"/api/bin-projects/{project['id']}/sketches", json={}).json()
+
+    resp = client.patch(f"/api/bin-projects/{project['id']}/sketches/{sketch['id']}", json={
+        "bin_layout": [
+            {"bin_id": bin_data["id"], "x": 0, "y": 0},
+            {"bin_id": bin_data["id"], "x": 2, "y": 0, "rotation": 180},
+        ],
+    })
+
+    assert resp.status_code == 200
+    layout = resp.json()["bin_layout"]
+    assert [p["bin_id"] for p in layout] == [bin_data["id"], bin_data["id"]]
+    assert layout[0]["id"] != layout[1]["id"]
+    assert layout[1]["rotation"] == 180
+
+
+def test_sketch_layout_drops_placements_when_bin_leaves_project(tmp_path, monkeypatch):
+    client = _api_client(tmp_path, monkeypatch)
+    project = client.post("/api/bin-projects", json={"name": "Top drawer"}).json()
+    kept = client.post("/api/bins", json={"name": "Bin A", "project_id": project["id"]}).json()
+    detached = client.post("/api/bins", json={"name": "Bin B", "project_id": project["id"]}).json()
+    deleted = client.post("/api/bins", json={"name": "Bin C", "project_id": project["id"]}).json()
+    sketch = client.post(f"/api/bin-projects/{project['id']}/sketches", json={}).json()
+
+    client.patch(f"/api/bin-projects/{project['id']}/sketches/{sketch['id']}", json={
+        "bin_layout": [
+            {"bin_id": kept["id"], "x": 0, "y": 0},
+            {"bin_id": kept["id"], "x": 1, "y": 0},
+            {"bin_id": detached["id"], "x": 2, "y": 0},
+            {"bin_id": deleted["id"], "x": 4, "y": 0},
+        ],
+    })
+    client.delete(f"/api/bin-projects/{project['id']}/bins/{detached['id']}")
+    client.delete(f"/api/bins/{deleted['id']}")
+
+    layout = client.get(f"/api/bin-projects/{project['id']}").json()["sketches"][0]["bin_layout"]
+
+    assert [p["bin_id"] for p in layout] == [kept["id"], kept["id"]]
+
+
+def test_repair_drops_stale_layout_placements(tmp_path):
+    project_store = ProjectStore(tmp_path)
+    tool_store = ToolStore(tmp_path)
+    bin_store = BinStore(tmp_path)
+    bin_store.set("bin-1", BinModel(id="bin-1", project_id="project-1"))
+    project = BinProject(
+        id="project-1",
+        name="Top drawer",
+        bin_ids=["bin-1"],
+        sketches=[ProjectSketch(bin_layout=[
+            ProjectBinPlacement(bin_id="bin-1", x=0, y=0),
+            ProjectBinPlacement(bin_id="missing-bin", x=1, y=0),
+        ])],
+    )
+    project_store.set(project.id, project)
+
+    repaired = repair_project_links(project_store, project, tool_store, bin_store)
+
+    assert [p.bin_id for p in repaired.sketches[0].bin_layout] == ["bin-1"]
+
+
+def test_bin_summary_exposes_grid_and_height_for_sketching(tmp_path, monkeypatch):
+    client = _api_client(tmp_path, monkeypatch)
+    client.post("/api/bins", json={
+        "name": "Bin A",
+        "bin_config": {"grid_x": 3, "grid_y": 1, "height_units": 6, "half_grid_base": True},
+    })
+
+    summary = client.get("/api/bins").json()["bins"][0]
+
+    assert summary["grid_x"] == 3
+    assert summary["grid_y"] == 1
+    assert summary["height_units"] == 6
+    assert summary["half_grid_base"] is True

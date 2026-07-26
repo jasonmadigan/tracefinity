@@ -20,6 +20,7 @@ from app.auth import get_user_id
 from app.config import ensure_user_dirs, settings
 from app.constants import GF_GRID
 from app.models.schemas import (
+    DEFAULT_SKETCH_NAME,
     BinConfig,
     BinDefaults,
     BinListResponse,
@@ -46,6 +47,9 @@ from app.models.schemas import (
     Polygon,
     PolygonsRequest,
     ProjectHealthResponse,
+    ProjectSketch,
+    ProjectSketchCreateRequest,
+    ProjectSketchUpdateRequest,
     SaveToolsRequest,
     SaveToolsResponse,
     Session,
@@ -73,6 +77,8 @@ from app.services.polygon_scaler import PolygonScaler, ScaledFingerHole, ScaledP
 from app.services.project_service import (
     add_bin_to_project,
     add_project_to_tools,
+    drop_bins_from_layout,
+    get_sketch,
     health_response,
     make_project_detail,
     make_project_summary,
@@ -81,6 +87,7 @@ from app.services.project_service import (
     remove_bin_from_project,
     remove_project_from_tools,
     repair_project_links,
+    validate_bin_layout,
 )
 from app.services.project_store import ProjectStore
 from app.services.session_store import SessionStore
@@ -1179,8 +1186,6 @@ async def create_bin_project(request: Request, req: BinProjectCreateRequest, use
         description=req.description,
         status=req.status,
         tool_ids=list(dict.fromkeys(req.tool_ids)),
-        target_grid_x=req.target_grid_x,
-        target_grid_y=req.target_grid_y,
         default_bin_config=req.default_bin_config,
         notes=req.notes,
         created_at=now,
@@ -1211,6 +1216,7 @@ async def update_bin_project(
     project = project_store.get(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="project not found")
+    _, _, user_bins = get_stores(user_id)
 
     if req.name is not None:
         name = req.name.strip()
@@ -1221,10 +1227,6 @@ async def update_bin_project(
         project.description = req.description
     if "status" in req.model_fields_set and req.status is not None:
         project.status = req.status
-    if "target_grid_x" in req.model_fields_set:
-        project.target_grid_x = req.target_grid_x
-    if "target_grid_y" in req.model_fields_set:
-        project.target_grid_y = req.target_grid_y
     if "default_bin_config" in req.model_fields_set:
         project.default_bin_config = req.default_bin_config
     if "notes" in req.model_fields_set:
@@ -1232,7 +1234,6 @@ async def update_bin_project(
 
     project.updated_at = _now_iso()
     project_store.set(project_id, project)
-    _, _, user_bins = get_stores(user_id)
     return make_project_detail(project, user_bins)
 
 
@@ -1301,6 +1302,85 @@ async def remove_tool_from_bin_project(
     _, user_tools, user_bins = get_stores(user_id)
     remove_project_from_tools(project_id, [tool_id], user_tools)
     return make_project_detail(project, user_bins)
+
+
+@router.post("/bin-projects/{project_id}/sketches", response_model=ProjectSketch)
+async def create_project_sketch(
+    request: Request,
+    project_id: str,
+    req: ProjectSketchCreateRequest = ProjectSketchCreateRequest(),
+    user_id: str = Depends(get_user_id),
+):
+    project_store = get_project_store(user_id)
+    project = project_store.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="project not found")
+
+    name = (req.name or "").strip() or f"{DEFAULT_SKETCH_NAME} {len(project.sketches) + 1}"
+    now = _now_iso()
+    sketch = ProjectSketch(
+        name=name,
+        target_grid_x=req.target_grid_x,
+        target_grid_y=req.target_grid_y,
+        created_at=now,
+        updated_at=now,
+    )
+    project.sketches.append(sketch)
+    project.updated_at = now
+    project_store.set(project_id, project)
+    return sketch
+
+
+@router.patch("/bin-projects/{project_id}/sketches/{sketch_id}", response_model=ProjectSketch)
+async def update_project_sketch(
+    request: Request,
+    project_id: str,
+    sketch_id: str,
+    req: ProjectSketchUpdateRequest,
+    user_id: str = Depends(get_user_id),
+):
+    project_store = get_project_store(user_id)
+    project = project_store.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="project not found")
+    sketch = get_sketch(project, sketch_id)
+    _, _, user_bins = get_stores(user_id)
+
+    if req.name is not None:
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="sketch name is required")
+        sketch.name = name
+    if "target_grid_x" in req.model_fields_set:
+        sketch.target_grid_x = req.target_grid_x
+    if "target_grid_y" in req.model_fields_set:
+        sketch.target_grid_y = req.target_grid_y
+    if "bin_layout" in req.model_fields_set:
+        sketch.bin_layout = validate_bin_layout(project, req.bin_layout or [], user_bins)
+
+    sketch.updated_at = _now_iso()
+    project.updated_at = sketch.updated_at
+    project_store.set(project_id, project)
+    return sketch
+
+
+@router.delete("/bin-projects/{project_id}/sketches/{sketch_id}", response_model=StatusResponse)
+async def delete_project_sketch(
+    request: Request,
+    project_id: str,
+    sketch_id: str,
+    user_id: str = Depends(get_user_id),
+):
+    project_store = get_project_store(user_id)
+    project = project_store.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="project not found")
+    get_sketch(project, sketch_id)
+
+    project.sketches = [sketch for sketch in project.sketches if sketch.id != sketch_id]
+    project.updated_at = _now_iso()
+    project_store.set(project_id, project)
+    return StatusResponse(status="deleted")
 
 
 @router.get("/bin-projects/{project_id}/health", response_model=ProjectHealthResponse)
@@ -1387,6 +1467,7 @@ async def detach_bin_from_bin_project(
     bin_data = user_bins.get(bin_id)
     if bin_id in project.bin_ids:
         project.bin_ids = [bid for bid in project.bin_ids if bid != bin_id]
+    drop_bins_from_layout(project, {bin_id})
     if bin_data and bin_data.project_id == project_id:
         bin_data.project_id = None
         user_bins.set(bin_id, bin_data)
@@ -1446,6 +1527,8 @@ async def list_bins(request: Request, user_id: str = Depends(get_user_id)):
             has_stl=bin_data.stl_path is not None,
             grid_x=bin_data.bin_config.grid_x,
             grid_y=bin_data.bin_config.grid_y,
+            height_units=bin_data.bin_config.height_units,
+            half_grid_base=bin_data.bin_config.half_grid_base,
             preview_tools=[BinPreviewTool(points=pt.points, interior_rings=pt.interior_rings) for pt in bin_data.placed_tools],
         ))
     summaries.sort(key=lambda b: b.created_at or "", reverse=True)

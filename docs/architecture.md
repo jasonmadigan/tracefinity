@@ -17,6 +17,7 @@
 - Tool editor for editing saved tools (vertices, finger holes)
 - Bin editor for positioning tools in bins, adding text labels
 - Project screen for planning a group of tools/bins and tracking placed vs unplaced tools
+- Drawer plan screen for arranging project bins on a virtual gridfinity grid (2D + 3D)
 - 3D STL preview (react-three-fiber)
 - Shows user what prompts are sent to Gemini
 
@@ -51,6 +52,7 @@ tracefinity/
 │   │   │   ├── trace/[id]/            # corner + polygon editing
 │   │   │   ├── tools/[id]/            # tool vertex/hole editor
 │   │   │   ├── projects/[id]/         # project planning workflow
+│   │   │   │   └── sketch/[sketchId]/  # one drawer plan (bin placement on a grid)
 │   │   │   └── bins/[id]/             # bin builder + 3D preview
 │   │   ├── components/
 │   │   │   ├── BinEditor.tsx          # bin layout orchestrator
@@ -58,6 +60,8 @@ tracefinity/
 │   │   │   ├── BinEditorCanvas.tsx    # bin SVG canvas
 │   │   │   ├── BinConfigurator.tsx    # bin settings panel
 │   │   │   ├── BinPreview3D.tsx       # three.js STL viewer
+│   │   │   ├── DrawerSketchCanvas.tsx # drawer plan SVG canvas (drag/drop)
+│   │   │   ├── DrawerSketch3D.tsx     # drawer plan 3D view (loads bin STLs)
 │   │   │   ├── ToolEditor.tsx         # tool editor orchestrator
 │   │   │   ├── ToolEditorToolbar.tsx  # tool toolbar (mode, smooth, undo)
 │   │   │   ├── ToolEditorCanvas.tsx   # tool SVG canvas
@@ -71,6 +75,7 @@ tracefinity/
 │   │   └── lib/
 │   │       ├── api.ts                 # API client
 │   │       ├── constants.ts           # shared constants
+│   │       ├── drawerLayout.ts        # drawer grid math (footprints, packing)
 │   │       └── svg.ts                 # polygon path, smoothing, snap
 │   └── package.json
 ├── .github/workflows/
@@ -86,12 +91,13 @@ tracefinity/
 - **Tool**: a single traced polygon + finger holes, stored in mm, centred at origin. Lives in a persistent library (`tools.json`).
 - **PlacedTool**: a positioned copy of a tool in a bin. Points/holes in bin-space mm. Has `tool_id` linking back to source.
 - **Bin**: bin config + placed tools + text labels. Used for STL generation (`bins.json`).
-- **BinProject**: a planning group of tool ids and linked bin ids. Placement status is derived from linked bins (`projects.json`). Projects can carry default bin settings used when creating project bins.
+- **BinProject**: a planning group of tool ids and linked bin ids. Placement status is derived from linked bins (`projects.json`). Projects can carry default bin settings used when creating project bins, plus any number of **ProjectSketch** drawer plans.
+- **ProjectSketch**: one drawer plan owned by a project: a name, an optional drawer grid (`target_grid_x`/`target_grid_y`, 1-40 units) and a `bin_layout` of `ProjectBinPlacement` records (`id`, `bin_id`, `x`, `y`, `rotation`, `color`) positioning linked bins on that grid. A bin may appear several times, so placements are identified by their own id.
 - **Session**: ephemeral, used only for upload/trace workflow. Output is tools saved to library via `save-tools`.
 
 PlacedTools sync with their library source on bin load (`GET /bins/{id}`) via `bin_service.sync_placed_tools()`. Edits to a tool's points, finger holes, or name propagate to all bins that use it. The position offset is preserved.
 
-Projects do not own tools or bins. Tools keep `project_ids`, bins keep `project_id`, and project health/repair endpoints keep those links consistent when records are renamed, deleted, or manually edited.
+Projects do not own tools or bins. Tools keep `project_ids`, bins keep `project_id`, and project health/repair endpoints keep those links consistent when records are renamed, deleted, or manually edited. Drawer placements follow the bin links: detaching or deleting a bin drops its placement from every sketch, and repair prunes placements for bins that are no longer linked.
 
 When `TOOL_LABEL_PROVIDER=ollama`, `tool_namer.py` runs after contour extraction for both AI tracing and manual mask upload, before the session is persisted. It crops each still-generic polygon from the corrected source image, masks everything outside the contour to white, asks the selected `ToolNamer` for one short JSON tool name, validates it, and writes the result back to `Polygon.label`. Naming is optional and non-fatal; unsupported providers, missing images, or naming failures keep the generic `tool N` labels.
 
