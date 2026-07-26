@@ -17,9 +17,11 @@ export type Selection =
 interface Props {
   editMode: EditMode
   setEditMode: (mode: EditMode) => void
-  smoothed: boolean
+  previewSmoothed: boolean
+  setPreviewSmoothed: (smoothed: boolean) => void
+  outputSmoothed: boolean
   smoothLevel: number
-  onSmoothedChange: (smoothed: boolean) => void
+  onOutputSmoothedChange: (smoothed: boolean) => void
   onSmoothLevelChange: (level: number) => void
   snapEnabled: boolean
   setSnapEnabled: (enabled: boolean) => void
@@ -58,7 +60,7 @@ interface Props {
 
 export function ToolEditorToolbar({
   editMode, setEditMode,
-  smoothed, smoothLevel, onSmoothedChange, onSmoothLevelChange,
+  previewSmoothed, setPreviewSmoothed, outputSmoothed, smoothLevel, onOutputSmoothedChange, onSmoothLevelChange,
   snapEnabled, setSnapEnabled, snapGrid, setSnapGrid,
   mirrorMode, toggleMirror, axisOrientation, setAxisOrientation, keepSide, flipKeepSide,
   simplifyLevel, onSimplifyPreview, onSimplifyCommit, simplifyDisabled, nodeCount,
@@ -86,10 +88,10 @@ export function ToolEditorToolbar({
           <button
             onClick={() => setEditMode('add-vertex')}
             className={`px-2.5 py-1 rounded-[7px] text-[11px] font-medium flex items-center gap-1.5 transition-colors ${
-              smoothed ? 'opacity-30 cursor-not-allowed text-text-muted' : editMode === 'add-vertex' ? 'bg-accent-muted text-accent' : 'hover:bg-border/50 text-text-secondary'
+              previewSmoothed ? 'opacity-30 cursor-not-allowed text-text-muted' : editMode === 'add-vertex' ? 'bg-accent-muted text-accent' : 'hover:bg-border/50 text-text-secondary'
             }`}
-            title={smoothed ? 'Switch to Accurate mode to add points' : 'Add vertex on edge'}
-            disabled={smoothed}
+            title={previewSmoothed ? 'Switch to Accurate view to add points' : 'Add vertex on edge'}
+            disabled={previewSmoothed}
           >
             <Plus className="w-4 h-4" />
             Add point
@@ -97,10 +99,10 @@ export function ToolEditorToolbar({
           <button
             onClick={() => setEditMode('delete-vertex')}
             className={`px-2.5 py-1 rounded-[7px] text-[11px] font-medium flex items-center gap-1.5 transition-colors ${
-              smoothed || displayPointsCount <= 3 ? 'opacity-30 cursor-not-allowed text-text-muted' : editMode === 'delete-vertex' ? 'bg-accent-muted text-accent' : 'hover:bg-border/50 text-text-secondary'
+              previewSmoothed || displayPointsCount <= 3 ? 'opacity-30 cursor-not-allowed text-text-muted' : editMode === 'delete-vertex' ? 'bg-accent-muted text-accent' : 'hover:bg-border/50 text-text-secondary'
             }`}
-            title={smoothed ? 'Switch to Accurate mode to remove points' : 'Delete vertex'}
-            disabled={smoothed || displayPointsCount <= 3}
+            title={previewSmoothed ? 'Switch to Accurate view to remove points' : 'Delete vertex'}
+            disabled={previewSmoothed || displayPointsCount <= 3}
           >
             <Minus className="w-4 h-4" />
             Remove
@@ -265,21 +267,26 @@ export function ToolEditorToolbar({
           </>
         )}
 
-        <div className="flex items-center rounded-[7px] overflow-hidden border border-border-subtle text-[11px]">
+        <div
+          className="flex items-center rounded-[7px] overflow-hidden border border-border-subtle text-[11px]"
+          aria-label="Outline view"
+        >
           <button
-            onClick={() => onSmoothedChange(false)}
-            className={`px-2 py-1 transition-colors ${!smoothed ? 'bg-accent-muted text-accent' : 'text-text-muted hover:text-text-secondary'}`}
+            onClick={() => setPreviewSmoothed(false)}
+            aria-pressed={!previewSmoothed}
+            className={`px-2 py-1 transition-colors ${!previewSmoothed ? 'bg-accent-muted text-accent' : 'text-text-muted hover:text-text-secondary'}`}
           >
             Accurate
           </button>
           <button
-            onClick={() => { onSmoothedChange(true); if (editMode === 'add-vertex' || editMode === 'delete-vertex') setEditMode('select') }}
-            className={`px-2 py-1 transition-colors ${smoothed ? 'bg-accent-muted text-accent' : 'text-text-muted hover:text-text-secondary'}`}
+            onClick={() => { setPreviewSmoothed(true); if (editMode === 'add-vertex' || editMode === 'delete-vertex') setEditMode('select') }}
+            aria-pressed={previewSmoothed}
+            className={`px-2 py-1 transition-colors ${previewSmoothed ? 'bg-accent-muted text-accent' : 'text-text-muted hover:text-text-secondary'}`}
           >
             Smooth
           </button>
         </div>
-        {smoothed && (
+        {previewSmoothed && (
           <input
             type="range"
             min={0}
@@ -291,6 +298,16 @@ export function ToolEditorToolbar({
             title={`Smooth level: ${Math.round(smoothLevel * 100)}%`}
           />
         )}
+        <button
+          onClick={() => onOutputSmoothedChange(!outputSmoothed)}
+          aria-pressed={outputSmoothed}
+          className={`px-2 py-1 rounded-[7px] text-[11px] transition-colors ${
+            outputSmoothed ? 'bg-accent-muted text-accent' : 'hover:bg-border/50 text-text-secondary'
+          }`}
+          title={`Bins and exports use the ${outputSmoothed ? 'smooth' : 'accurate'} outline`}
+        >
+          Output: {outputSmoothed ? 'Smooth' : 'Accurate'}
+        </button>
 
         <div className="h-4 w-px bg-border-subtle mx-0.5" />
 

@@ -134,17 +134,18 @@ test.describe.serial('happy path', () => {
   })
 
   test('toggle smooth', async () => {
-    // tools now default to smoothed, so toggle to accurate first
+    // the editor always opens in the accurate view, independently of the
+    // tool's saved output preference
     const statusText = page.getByText(/\d+ vertices/)
-    const smoothedText = await statusText.textContent()
-
-    await page.getByRole('button', { name: 'Accurate' }).click()
-    await expect(statusText).not.toHaveText(smoothedText!, { timeout: 5_000 })
-
     const accurateText = await statusText.textContent()
+    await expect(page.getByRole('button', { name: 'Accurate', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('button', { name: 'Output: Smooth' })).toHaveAttribute('aria-pressed', 'true')
 
-    await page.getByRole('button', { name: 'Smooth' }).click()
+    await page.getByRole('button', { name: 'Smooth', exact: true }).click()
     await expect(statusText).not.toHaveText(accurateText!, { timeout: 5_000 })
+
+    await page.getByRole('button', { name: 'Accurate', exact: true }).click()
+    await expect(statusText).toHaveText(accurateText!, { timeout: 5_000 })
   })
 
   test('rotating keeps the source photo aligned through undo/redo', async () => {
@@ -176,8 +177,7 @@ test.describe.serial('happy path', () => {
     await page.goto(`/tools/${toolId}`)
     const image = page.locator('svg image')
     await expect(image).toBeVisible({ timeout: 10_000 })
-    // accurate mode renders raw vertices, so the path's first vertex is stable
-    await page.getByRole('button', { name: 'Accurate' }).click()
+    // the editor opens in accurate mode, so the path's first vertex is stable
 
     // scope to the editor canvas: the dev overlay's shadow DOM also holds
     // evenodd paths and playwright locators pierce shadow roots
@@ -209,8 +209,6 @@ test.describe.serial('happy path', () => {
     await expect(image).toHaveAttribute('transform', rotated, { timeout: 5_000 })
     await page.getByRole('button', { name: 'Undo (Ctrl+Z)' }).click()
     await expect(image).toHaveAttribute('transform', before, { timeout: 5_000 })
-
-    await page.getByRole('button', { name: 'Smooth' }).click()
   })
 
   test('flips and drag-rotate carry the photo through undo', async () => {

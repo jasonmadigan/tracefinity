@@ -64,6 +64,7 @@ export function ToolEditor({ points, fingerHoles, interiorRings, smoothed, smoot
   const svgRef = useRef<SVGSVGElement>(null)
   const [selection, setSelection] = useState<Selection>(null)
   const [editMode, setEditMode] = useState<EditMode>('select')
+  const [previewSmoothed, setPreviewSmoothed] = useState(false)
   const [dragging, setDragging] = useState<DragState>(null)
   // off by default: outline vertices carry the traced size, a 5mm lattice
   // would quantise corrections by up to ~3.5mm
@@ -131,10 +132,10 @@ export function ToolEditor({ points, fingerHoles, interiorRings, smoothed, smoot
   const displayHoles = dragHoles ?? fingerHoles
   const displayRings = dragRings ?? currentRings
   const smoothedPoints = useMemo(() => {
-    if (!smoothed || rawDisplayPoints.length <= 3) return null
+    if (!previewSmoothed || rawDisplayPoints.length <= 3) return null
     return simplifyPolygon(rawDisplayPoints, smoothEpsilon(smoothLevel))
-  }, [smoothed, smoothLevel, rawDisplayPoints])
-  const displayPoints = smoothed && smoothedPoints ? smoothedPoints : rawDisplayPoints
+  }, [previewSmoothed, smoothLevel, rawDisplayPoints])
+  const displayPoints = previewSmoothed && smoothedPoints ? smoothedPoints : rawDisplayPoints
 
   // refs for stale closure avoidance
   const pointsRef = useRef(points)
@@ -821,7 +822,7 @@ export function ToolEditor({ points, fingerHoles, interiorRings, smoothed, smoot
         gridStep={gridStep}
         zoom={zoom}
         displayPoints={displayPoints}
-        smoothed={smoothed}
+        smoothed={previewSmoothed}
         interiorRings={displayRings}
         points={points}
         editMode={editMode}
@@ -850,9 +851,11 @@ export function ToolEditor({ points, fingerHoles, interiorRings, smoothed, smoot
         <ToolEditorToolbar
           editMode={editMode}
           setEditMode={setEditMode}
-          smoothed={smoothed}
+          previewSmoothed={previewSmoothed}
+          setPreviewSmoothed={setPreviewSmoothed}
+          outputSmoothed={smoothed}
           smoothLevel={smoothLevel}
-          onSmoothedChange={onSmoothedChange}
+          onOutputSmoothedChange={onSmoothedChange}
           onSmoothLevelChange={onSmoothLevelChange}
           snapEnabled={snapEnabled}
           setSnapEnabled={setSnapEnabled}
@@ -916,7 +919,7 @@ export function ToolEditor({ points, fingerHoles, interiorRings, smoothed, smoot
 
       {/* floating info pill: bottom left */}
       <div className="absolute bottom-3.5 left-3.5 z-20 glass-toolbar px-3 py-1.5 text-[11px] text-text-secondary">
-        {displayPoints.length} vertices{smoothed ? ` (${points.length} raw)` : ''}, {displayHoles.length} cutout{displayHoles.length !== 1 ? 's' : ''}
+        {displayPoints.length} vertices{previewSmoothed ? ` (${points.length} raw)` : ''}, {displayHoles.length} cutout{displayHoles.length !== 1 ? 's' : ''}
         {' \u00b7 '}
         {((bounds.maxX - bounds.minX)).toFixed(1)}&times;{((bounds.maxY - bounds.minY)).toFixed(1)} mm
       </div>

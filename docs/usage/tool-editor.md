@@ -34,11 +34,16 @@ Once placed:
 
 ## Smooth vs Accurate
 
-Toggle between two outline modes using the Accurate/Smooth buttons.
+The editor always opens in the **Accurate** view so the editable vertices are
+visible. Toggle the canvas preview using the Accurate/Smooth buttons; this does
+not change which outline bins and exports use.
 
 **Accurate** -- the raw traced polygon with all vertices. You can add, remove, and drag points.
 
-**Smooth** -- a simplified outline. A slider controls smoothing aggressiveness: range 0 to 1, step 0.05. Uses Chaikin subdivision, which always stays within the control polygon and never overshoots. Vertex editing (add/remove point) is disabled in this mode.
+**Smooth** -- a simplified outline. A slider controls smoothing aggressiveness: range 0 to 1, step 0.05. Uses Chaikin subdivision, which always stays within the control polygon and never overshoots. Vertex editing is unavailable in this preview.
+
+Use the separate **Output: Smooth/Accurate** button to choose which outline is
+used for bins and SVG exports. This preference is saved with the tool.
 
 ## Transforms
 
