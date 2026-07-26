@@ -6,6 +6,11 @@ const W = 2048
 const H = 1536
 
 describe('clampZoom', () => {
+  it('pins the clamp bounds shared with ToolEditor', () => {
+    expect(MIN_ZOOM).toBe(0.5)
+    expect(MAX_ZOOM).toBe(20)
+  })
+
   it('clamps below the minimum', () => {
     expect(clampZoom(0.1)).toBe(MIN_ZOOM)
   })

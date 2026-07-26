@@ -497,6 +497,8 @@ export function PolygonEditor({
             width={imageSize.width}
             height={imageSize.height}
             preserveAspectRatio="none"
+            role="img"
+            aria-label="Corrected"
             className="pointer-events-none select-none"
           />
           {polygons.map((poly) => {
