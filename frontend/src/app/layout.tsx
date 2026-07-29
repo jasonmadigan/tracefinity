@@ -21,7 +21,7 @@ export default function RootLayout({
   const [showHelp, setShowHelp] = useState(false)
   const pathname = usePathname()
 
-  const isFullBleed = /^\/(trace|tools|bins|stations)\//.test(pathname)
+  const isFullBleed = pathname === '/trace' || /^\/(trace|tools|bins|stations)\//.test(pathname)
 
   return (
     <html lang="en">

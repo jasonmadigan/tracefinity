@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { Upload } from 'lucide-react'
+import { Camera, Upload } from 'lucide-react'
 import { useReducedMotion } from '@/hooks/useReducedMotion'
 
 function UploadIllustration({ reduceMotion }: { reduceMotion: boolean }) {
@@ -152,21 +152,25 @@ function UploadIllustration({ reduceMotion }: { reduceMotion: boolean }) {
 
 interface Props {
   onUpload: (file: File) => void
+  onCaptureRequest?: () => void
   disabled?: boolean
 }
 
-export function ImageUploader({ onUpload, disabled }: Props) {
-  const inputRef = useRef<HTMLInputElement>(null)
+export function ImageUploader({ onUpload, onCaptureRequest, disabled }: Props) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const reduceMotion = useReducedMotion()
 
-  function handleClick() {
-    if (!disabled) inputRef.current?.click()
+  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    const target = e.target as HTMLElement
+    if (target.closest('button,input')) return
+    if (!disabled) fileInputRef.current?.click()
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (file && !disabled) onUpload(file)
+    e.target.value = ''
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -200,7 +204,14 @@ export function ImageUploader({ onUpload, disabled }: Props) {
         ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
       `}
     >
-      <input ref={inputRef} type="file" accept="image/*" onChange={handleChange} className="hidden" />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onClick={(e) => e.stopPropagation()}
+        onChange={handleChange}
+        className="hidden"
+      />
       {isDragging ? (
         <div className="py-4 text-center">
           <div className="w-10 h-10 mx-auto mb-3 rounded-full bg-accent-muted flex items-center justify-center">
@@ -235,10 +246,31 @@ export function ImageUploader({ onUpload, disabled }: Props) {
                 Take a top-down photo
               </li>
             </ul>
-            <span className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-accent text-white text-sm font-semibold shadow-lg shadow-accent/20">
-              <Upload className="w-4 h-4" />
-              Upload photo
-            </span>
+            <div className="flex flex-col sm:flex-row gap-2 justify-center sm:justify-start">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCaptureRequest?.()
+                }}
+                disabled={disabled || !onCaptureRequest}
+                className="min-h-11 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-accent text-white text-sm font-semibold shadow-lg shadow-accent/20 cursor-pointer disabled:opacity-50"
+              >
+                <Camera className="w-4 h-4" />
+                Take photo
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (!disabled) fileInputRef.current?.click()
+                }}
+                className="min-h-11 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-elevated border border-border-subtle text-text-primary text-sm font-semibold hover:bg-glass-hover transition-colors cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                Upload file
+              </button>
+            </div>
           </div>
         </div>
       )}
