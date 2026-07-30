@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.api.routes as routes
@@ -11,19 +12,22 @@ from app.main import app
 USER_ID = "cjld2cjxh0000qzrmn831i7rn"
 
 
-def _client(tmp_path, monkeypatch):
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    # routes imports the same settings object, so one patch covers both
     monkeypatch.setattr(settings, "storage_path", tmp_path)
-    monkeypatch.setattr(routes.settings, "storage_path", tmp_path)
     # test_proxy_middleware reloads app.main with a secret; pin auth off
     monkeypatch.setattr(main_mod.settings, "proxy_secret", None)
     routes._store_cache.clear()
     routes._project_store_cache.clear()
     ensure_user_dirs(tmp_path / "default")
-    return TestClient(app)
+    yield TestClient(app)
+    # don't leak this test's user id into later tests
+    routes._store_cache.clear()
+    routes._project_store_cache.clear()
 
 
-def test_delete_user_evicts_project_store_cache(tmp_path, monkeypatch):
-    client = _client(tmp_path, monkeypatch)
+def test_delete_user_evicts_project_store_cache(client):
     headers = {"x-user-id": USER_ID}
 
     resp = client.post("/api/bin-projects", json={"name": "Old drawer"}, headers=headers)
@@ -36,8 +40,7 @@ def test_delete_user_evicts_project_store_cache(tmp_path, monkeypatch):
     assert USER_ID not in routes._project_store_cache
 
 
-def test_deleted_projects_do_not_resurrect_on_next_write(tmp_path, monkeypatch):
-    client = _client(tmp_path, monkeypatch)
+def test_deleted_projects_do_not_resurrect_on_next_write(client, tmp_path):
     headers = {"x-user-id": USER_ID}
 
     resp = client.post("/api/bin-projects", json={"name": "Old drawer"}, headers=headers)
