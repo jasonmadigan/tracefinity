@@ -15,6 +15,16 @@ The paper is for scale only. Tools can overflow the paper edges. The full visibl
 - **Shoot from above** -- aim for directly overhead. Perspective correction handles some angle, but straight-down needs the least correction. Overhead does not mean close up: distance matters more than angle for scale accuracy.
 - **Shoot from a distance** -- 50-60cm or more, with the page filling around half the frame. The paper calibrates the table surface, so anything raised above it projects oversized by H/(H-t) (camera height H, tool thickness t). A thick tool shot from around 20cm can trace roughly 8% too large; from 60cm or more that drops to around 2%.
 
+## Photo warnings
+
+After you confirm the paper corners, Tracefinity checks the photo and flags problems that reduce trace accuracy:
+
+- **Camera too close** -- estimated from the photo's EXIF data. Close shots exaggerate outlines of thick tools (a 15 mm-thick tool shot from 25 cm traces roughly 6% oversized). Shoot from 60 cm or higher. Skipped when the photo has no EXIF data (e.g. screenshots or edited images).
+- **Paper cut off** -- a paper corner sits at or beyond the photo edge.
+- **Extreme perspective** -- a strong camera angle degrades edge accuracy even after correction.
+
+Warnings are advisory: you can dismiss them and continue, but retaking the photo gives better results.
+
 ## Supported formats
 
 JPG, PNG, WebP, and HEIC. There is no hard file size limit, but large photos take longer to upload and process.

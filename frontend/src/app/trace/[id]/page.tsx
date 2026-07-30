@@ -10,8 +10,9 @@ import { SessionInfo } from '@/components/SessionInfo'
 import { Alert } from '@/components/Alert'
 import { getSession, setCorners, traceTools, updatePolygons, updateSession, getImageUrl, getAvailableKeys, traceFromMask, saveToolsFromSession } from '@/lib/api'
 import { CornersHint, TraceHint, EditHint } from '@/components/OnboardingIllustrations'
+import { PhotoWarningsBanner } from '@/components/PhotoWarningsBanner'
 import { StepBar } from '@/components/StepBar'
-import type { PaperSize, Point, Polygon, Session } from '@/types'
+import type { PaperSize, PhotoWarning, Point, Polygon, Session } from '@/types'
 
 type Step = 'corners' | 'trace' | 'edit'
 
@@ -63,6 +64,8 @@ export default function TracePage() {
   const [imageUrl, setImageUrl] = useState<string>('')
   const [correctedImageUrl, setCorrectedImageUrl] = useState<string>('')
   const [polygons, setPolygons] = useState<Polygon[]>([])
+  const [photoWarnings, setPhotoWarnings] = useState<PhotoWarning[]>([])
+  const [warningsDismissed, setWarningsDismissed] = useState(false)
 
   const [provider, setProvider] = useState<'google' | 'manual'>('google')
   const [apiKey, setApiKey] = useState('')
@@ -123,6 +126,9 @@ export default function TracePage() {
         if (s.corrected_image_path) {
           setCorrectedImageUrl(`/storage/${s.corrected_image_path}`)
         }
+        if (s.photo_warnings?.length) {
+          setPhotoWarnings(s.photo_warnings)
+        }
         if (s.mask_image_path) {
           const maskRel = s.mask_image_path.replace(/^storage\//, '')
           setMaskUrl(`/storage/${maskRel}`)
@@ -167,6 +173,8 @@ export default function TracePage() {
       const result = await setCorners(sessionId, corners, paperSize)
       setCorrectedImageUrl(result.corrected_image_url)
       setImageVersion(Date.now())
+      setPhotoWarnings(result.warnings ?? [])
+      setWarningsDismissed(false)
 
       if (singleTracer && tracers.length === 1) {
         // single tracer: trace immediately without changing step
@@ -646,6 +654,13 @@ export default function TracePage() {
                 className="w-full rounded-lg border border-border-subtle"
               />
             </div>
+          )}
+
+          {!warningsDismissed && (
+            <PhotoWarningsBanner
+              warnings={photoWarnings}
+              onDismiss={() => setWarningsDismissed(true)}
+            />
           )}
 
           {error && <Alert variant="error">{error}</Alert>}
