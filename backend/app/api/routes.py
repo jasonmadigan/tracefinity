@@ -69,6 +69,7 @@ from app.services.geometry import optimal_rotation_angle as _optimal_rotation_an
 from app.services.image_ingest import ingest_image
 from app.services.image_processor import ImageProcessor
 from app.services.image_service import generate_tool_thumbnail
+from app.services.photo_checks import check_photo, extract_focal_length_35mm
 from app.services.polygon_scaler import PolygonScaler, ScaledFingerHole, ScaledPolygon
 from app.services.project_service import (
     add_bin_to_project,
@@ -514,6 +515,9 @@ async def upload_image(request: Request, image: UploadFile, user_id: str = Depen
     if len(content) > max_bytes:
         raise HTTPException(status_code=413, detail=f"file too large (max {settings.max_upload_mb}MB)")
 
+    # exif is dropped when the image is re-encoded, so read it first
+    focal_length = extract_focal_length_35mm(content)
+
     content, ext, _ = ingest_image(content, ext, MAX_UPLOAD_DIM)
     image_path = up / "uploads" / f"{session_id}{ext}"
     image_path.write_bytes(content)
@@ -526,6 +530,7 @@ async def upload_image(request: Request, image: UploadFile, user_id: str = Depen
         created_at=datetime.utcnow().isoformat(),
         original_image_path=_rel(image_path, up),
         corners=corner_points,
+        focal_length_35mm=focal_length,
     ))
 
     return UploadResponse(
@@ -543,6 +548,18 @@ async def set_corners(request: Request, session_id: str, req: CornersRequest, us
         raise HTTPException(status_code=404, detail="session not found")
 
     corners = [(p.x, p.y) for p in req.corners]
+
+    # advisory photo checks run against the original before it is deleted
+    photo_warnings = []
+    try:
+        with Image.open(_abs(session.original_image_path)) as im:
+            img_w, img_h = im.size
+        photo_warnings = check_photo(
+            corners, img_w, img_h, req.paper_size, session.focal_length_35mm
+        )
+    except Exception:
+        logger.exception("photo checks skipped")
+
     output_path, scale_factor = image_processor.apply_perspective_correction(
         _abs(session.original_image_path), corners, req.paper_size
     )
@@ -567,11 +584,13 @@ async def set_corners(request: Request, session_id: str, req: CornersRequest, us
     session.corners = req.corners
     session.paper_size = req.paper_size
     session.scale_factor = scale_factor
+    session.photo_warnings = photo_warnings or None
     user_sessions.set(session_id, session)
 
     return CornersResponse(
         corrected_image_url=f"/storage/{session.corrected_image_path}",
         scale_factor=scale_factor,
+        warnings=photo_warnings,
     )
 
 

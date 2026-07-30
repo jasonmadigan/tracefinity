@@ -62,6 +62,7 @@ class CornersRequest(BaseModel):
 class CornersResponse(BaseModel):
     corrected_image_url: str
     scale_factor: float
+    warnings: list[PhotoWarning] = []
 
 
 class TraceRequest(BaseModel):
@@ -225,6 +226,8 @@ class Session(BaseModel):
     corners: list[Point] | None = None
     paper_size: PaperSize | None = None
     scale_factor: float | None = None
+    focal_length_35mm: float | None = None
+    photo_warnings: list[PhotoWarning] | None = None
     polygons: list[Polygon] | None = None
     stl_path: str | None = None
     layout: Layout | None = None
