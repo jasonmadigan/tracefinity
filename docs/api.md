@@ -2,7 +2,7 @@
 
 ## Sessions (trace workflow)
 - `POST /api/upload` - upload image, auto-detect corners
-- `POST /api/sessions/{id}/corners` - set corners, apply perspective correction
+- `POST /api/sessions/{id}/corners` - set corners, apply perspective correction; returns advisory photo warnings (camera too close, paper cut off, extreme perspective)
 - `POST /api/sessions/{id}/trace` - AI trace tool outlines
 - `POST /api/sessions/{id}/trace-mask` - trace from uploaded mask
 - `PUT /api/sessions/{id}/polygons` - save polygon edits
