@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import re
+import threading
 import uuid
 import zipfile
 from datetime import datetime
@@ -102,25 +103,38 @@ validate_tracer_ids(settings.available_tracers)
 _store_cache: dict[str, tuple[SessionStore, ToolStore, BinStore]] = {}
 _project_store_cache: dict[str, ProjectStore] = {}
 
+# serialises store creation against user deletion so a store cannot be
+# built from files that are mid-rmtree (issue #160). locks are never
+# removed; the dict is bounded by the number of user ids seen.
+_user_locks: dict[str, threading.Lock] = {}
+_user_locks_guard = threading.Lock()
+
+
+def user_lock(user_id: str) -> threading.Lock:
+    with _user_locks_guard:
+        return _user_locks.setdefault(user_id, threading.Lock())
+
 
 def get_stores(user_id: str) -> tuple[SessionStore, ToolStore, BinStore]:
-    if user_id not in _store_cache:
-        user_path = settings.storage_path / user_id
-        ensure_user_dirs(user_path)
-        _store_cache[user_id] = (
-            SessionStore(user_path),
-            ToolStore(user_path),
-            BinStore(user_path),
-        )
-    return _store_cache[user_id]
+    with user_lock(user_id):
+        if user_id not in _store_cache:
+            user_path = settings.storage_path / user_id
+            ensure_user_dirs(user_path)
+            _store_cache[user_id] = (
+                SessionStore(user_path),
+                ToolStore(user_path),
+                BinStore(user_path),
+            )
+        return _store_cache[user_id]
 
 
 def get_project_store(user_id: str) -> ProjectStore:
-    if user_id not in _project_store_cache:
-        user_path = settings.storage_path / user_id
-        ensure_user_dirs(user_path)
-        _project_store_cache[user_id] = ProjectStore(user_path)
-    return _project_store_cache[user_id]
+    with user_lock(user_id):
+        if user_id not in _project_store_cache:
+            user_path = settings.storage_path / user_id
+            ensure_user_dirs(user_path)
+            _project_store_cache[user_id] = ProjectStore(user_path)
+        return _project_store_cache[user_id]
 
 
 def _user_path(user_id: str) -> Path:
