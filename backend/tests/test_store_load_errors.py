@@ -16,9 +16,6 @@ from app.services.project_store import ProjectStore
 from app.services.session_store import SessionStore
 from app.services.tool_store import ToolStore
 
-# DrawerStore excluded: DrawerModel doesn't exist in schemas (dead code)
-
-
 # -- helpers --
 
 def _write_json(path, data):
