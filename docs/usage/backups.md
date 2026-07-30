@@ -11,7 +11,6 @@ storage/
     tools.json              # saved tool definitions (polygons, metadata)
     bins.json               # bin configurations (dimensions, placed tools, labels)
     bin-projects.json       # project groupings and status
-    drawers.json            # drawer layouts
     uploads/                # original uploaded photos
     processed/              # perspective-corrected images, masks
     outputs/                # generated STLs and 3MF files
