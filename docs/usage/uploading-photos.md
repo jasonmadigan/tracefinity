@@ -12,7 +12,8 @@ The paper is for scale only. Tools can overflow the paper edges. The full visibl
 - **Even lighting** -- avoid harsh shadows across the tools. Diffused overhead light works best.
 - **Flat tools** -- tools should lie flat on the paper. Raised handles or 3D shapes confuse the mask generation.
 - **No overlap** -- leave a small gap between tools so the AI can separate them.
-- **Shoot from above** -- aim for directly overhead. Perspective correction handles some angle, but straight-down gives the most accurate scale.
+- **Shoot from above** -- aim for directly overhead. Perspective correction handles some angle, but straight-down needs the least correction. Overhead does not mean close up: distance matters more than angle for scale accuracy.
+- **Shoot from a distance** -- 50-60cm or more, with the page filling around half the frame. The paper calibrates the table surface, so anything raised above it projects oversized by H/(H-t) (camera height H, tool thickness t). A thick tool shot from around 20cm can trace roughly 8% too large; from 60cm or more that drops to around 2%.
 
 ## Supported formats
 
@@ -23,3 +24,7 @@ Images are automatically downscaled to a maximum of 2048px on the longest edge. 
 ## Paper size
 
 After uploading, select A4, Letter, A3, or Tabloid. Pick whichever you actually used. This determines the scale of everything downstream: tool outlines, bin dimensions, and exported STL geometry.
+
+## Troubleshooting
+
+- **Cutout comes out a few percent larger than the tool** -- the photo was taken too close. The paper sits on the table, but a thick tool's outline sits above it, nearer the camera, so it projects oversized. Re-shoot from 50-60cm or more.
