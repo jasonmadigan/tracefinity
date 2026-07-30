@@ -11,6 +11,7 @@ import app.main as main_mod
 from app.config import ensure_user_dirs, settings
 from app.main import app
 from app.models.schemas import BinModel, BinProject, Session, Tool
+from app.services.store_errors import StoreClosedError
 
 # valid cuid per auth._USER_ID_RE
 USER_ID = "cjld2cjxh0000qzrmn831i7rn"
@@ -99,7 +100,7 @@ def test_captured_store_write_after_deletion_cannot_recreate_data(client, tmp_pa
     routes.get_project_store(USER_ID)
     assert (tmp_path / USER_ID).exists()
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(StoreClosedError):
         captured.set(record.id, make_record())
 
     assert not (tmp_path / USER_ID / filename).exists()

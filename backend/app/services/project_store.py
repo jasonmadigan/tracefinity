@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.models.schemas import BinProject
+from app.services.store_errors import StoreClosedError
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +39,15 @@ class ProjectStore:
         with self._lock:
             self._closed = True
 
+    def ensure_open(self):
+        """raise StoreClosedError if the owning user has been deleted"""
+        if self._closed:
+            raise StoreClosedError(f"store closed, refusing write to {self.file_path}")
+
     def _save(self):
         # runs with self._lock held; refuse writes from references
         # captured before user deletion (issue #160)
-        if self._closed:
-            raise RuntimeError(f"store closed, refusing write to {self.file_path}")
+        self.ensure_open()
         data = {pid: p.model_dump() for pid, p in self._projects.items()}
         temp_fd, temp_path = tempfile.mkstemp(
             dir=self.file_path.parent,
@@ -63,11 +68,15 @@ class ProjectStore:
 
     def set(self, project_id: str, project: BinProject):
         with self._lock:
+            # check before mutating so a refused write cannot leave a
+            # phantom record in memory
+            self.ensure_open()
             self._projects[project_id] = project
             self._save()
 
     def delete(self, project_id: str) -> Optional[BinProject]:
         with self._lock:
+            self.ensure_open()
             project = self._projects.pop(project_id, None)
             if project:
                 self._save()

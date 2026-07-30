@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.models.schemas import Session
+from app.services.store_errors import StoreClosedError
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +39,15 @@ class SessionStore:
         with self._lock:
             self._closed = True
 
+    def ensure_open(self):
+        """raise StoreClosedError if the owning user has been deleted"""
+        if self._closed:
+            raise StoreClosedError(f"store closed, refusing write to {self.file_path}")
+
     def _save(self):
         # runs with self._lock held; refuse writes from references
         # captured before user deletion (issue #160)
-        if self._closed:
-            raise RuntimeError(f"store closed, refusing write to {self.file_path}")
+        self.ensure_open()
         # atomic write: write to temp file then rename
         data = {sid: s.model_dump() for sid, s in self._sessions.items()}
         temp_fd, temp_path = tempfile.mkstemp(
@@ -64,11 +69,15 @@ class SessionStore:
 
     def set(self, session_id: str, session: Session):
         with self._lock:
+            # check before mutating so a refused write cannot leave a
+            # phantom record in memory
+            self.ensure_open()
             self._sessions[session_id] = session
             self._save()
 
     def delete(self, session_id: str) -> Optional[Session]:
         with self._lock:
+            self.ensure_open()
             session = self._sessions.pop(session_id, None)
             if session:
                 self._save()
