@@ -35,9 +35,11 @@ class SessionStore:
                 self._sessions = {}
 
     def close(self):
-        """block further disk writes; called when the owning user is deleted"""
+        """block further disk writes and drop cached data; called when the
+        owning user is deleted so captured references cannot read stale data"""
         with self._lock:
             self._closed = True
+            self._sessions = {}
 
     def ensure_open(self):
         """raise StoreClosedError if the owning user has been deleted"""
