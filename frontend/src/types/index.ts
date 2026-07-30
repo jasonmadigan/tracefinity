@@ -44,6 +44,11 @@ export interface Layout {
   text_labels: TextLabel[]
 }
 
+export interface PhotoWarning {
+  code: string
+  message: string
+}
+
 export interface Session {
   id: string
   name: string | null
@@ -56,6 +61,8 @@ export interface Session {
   corners: Point[] | null
   paper_size: PaperSize | null
   scale_factor: number | null
+  focal_length_35mm?: number | null
+  photo_warnings?: PhotoWarning[] | null
   polygons: Polygon[] | null
   stl_path: string | null
   layout: Layout | null
@@ -81,6 +88,7 @@ export interface UploadResponse {
 export interface CornersResponse {
   corrected_image_url: string
   scale_factor: number
+  warnings: PhotoWarning[]
 }
 
 export interface TraceResponse {
