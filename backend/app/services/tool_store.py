@@ -17,6 +17,7 @@ class ToolStore:
         self.file_path = storage_path / "tools.json"
         self._tools: dict[str, Tool] = {}
         self._lock = threading.Lock()
+        self._closed = False
         self._load()
 
     def _load(self):
@@ -32,7 +33,16 @@ class ToolStore:
                 logger.error(f"Failed to load {self.file_path}: {e}")
                 self._tools = {}
 
+    def close(self):
+        """block further disk writes; called when the owning user is deleted"""
+        with self._lock:
+            self._closed = True
+
     def _save(self):
+        # runs with self._lock held; refuse writes from references
+        # captured before user deletion (issue #160)
+        if self._closed:
+            raise RuntimeError(f"store closed, refusing write to {self.file_path}")
         data = {tid: t.model_dump() for tid, t in self._tools.items()}
         temp_fd, temp_path = tempfile.mkstemp(
             dir=self.file_path.parent,

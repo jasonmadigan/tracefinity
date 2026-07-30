@@ -17,6 +17,7 @@ class SessionStore:
         self.file_path = storage_path / "sessions.json"
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
+        self._closed = False
         self._load()
 
     def _load(self):
@@ -32,7 +33,16 @@ class SessionStore:
                 logger.error(f"Failed to load {self.file_path}: {e}")
                 self._sessions = {}
 
+    def close(self):
+        """block further disk writes; called when the owning user is deleted"""
+        with self._lock:
+            self._closed = True
+
     def _save(self):
+        # runs with self._lock held; refuse writes from references
+        # captured before user deletion (issue #160)
+        if self._closed:
+            raise RuntimeError(f"store closed, refusing write to {self.file_path}")
         # atomic write: write to temp file then rename
         data = {sid: s.model_dump() for sid, s in self._sessions.items()}
         temp_fd, temp_path = tempfile.mkstemp(

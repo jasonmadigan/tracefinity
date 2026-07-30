@@ -17,6 +17,7 @@ class ProjectStore:
         self.file_path = storage_path / "bin-projects.json"
         self._projects: dict[str, BinProject] = {}
         self._lock = threading.Lock()
+        self._closed = False
         self._load()
 
     def _load(self):
@@ -32,7 +33,16 @@ class ProjectStore:
                 logger.error(f"Failed to load {self.file_path}: {e}")
                 self._projects = {}
 
+    def close(self):
+        """block further disk writes; called when the owning user is deleted"""
+        with self._lock:
+            self._closed = True
+
     def _save(self):
+        # runs with self._lock held; refuse writes from references
+        # captured before user deletion (issue #160)
+        if self._closed:
+            raise RuntimeError(f"store closed, refusing write to {self.file_path}")
         data = {pid: p.model_dump() for pid, p in self._projects.items()}
         temp_fd, temp_path = tempfile.mkstemp(
             dir=self.file_path.parent,
