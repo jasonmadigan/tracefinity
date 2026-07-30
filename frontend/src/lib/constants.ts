@@ -6,3 +6,4 @@ export const SNAP_GRID_MAX = 42
 export const MAX_HISTORY = 50
 export const ZOOM_FACTOR = 1.15
 export const DEFAULT_CUTOUT_DEPTH = 20
+export const DOCS_BASE_URL = 'https://github.com/tracefinity/tracefinity/blob/main/docs'

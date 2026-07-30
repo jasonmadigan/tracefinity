@@ -1,10 +1,10 @@
 'use client'
 
 import { Alert } from '@/components/Alert'
+import { DOCS_BASE_URL } from '@/lib/constants'
 import type { PhotoWarning } from '@/types'
 
-export const PHOTO_GUIDE_URL =
-  'https://github.com/tracefinity/tracefinity/blob/main/docs/usage/uploading-photos.md'
+export const PHOTO_GUIDE_URL = `${DOCS_BASE_URL}/usage/uploading-photos.md`
 
 interface Props {
   warnings: PhotoWarning[]

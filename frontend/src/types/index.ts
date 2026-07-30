@@ -61,8 +61,8 @@ export interface Session {
   corners: Point[] | null
   paper_size: PaperSize | null
   scale_factor: number | null
-  focal_length_35mm?: number | null
-  photo_warnings?: PhotoWarning[] | null
+  focal_length_35mm: number | null
+  photo_warnings: PhotoWarning[] | null
   polygons: Polygon[] | null
   stl_path: string | null
   layout: Layout | null
