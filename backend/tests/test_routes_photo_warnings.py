@@ -1,7 +1,6 @@
 """Route-level tests for photo warnings on upload and corner correction."""
 
 import io
-import math
 
 from fastapi.testclient import TestClient
 from PIL import ExifTags, Image
@@ -10,9 +9,7 @@ import app.api.routes as routes
 from app.config import ensure_user_dirs
 from app.main import app
 from app.models.schemas import Session
-from app.services.photo_checks import FULL_FRAME_DIAG_MM
-
-A4_DIAG_MM = math.hypot(210, 297)
+from tests.conftest import corners_for_height
 
 
 def _client(tmp_path, monkeypatch):
@@ -20,21 +17,6 @@ def _client(tmp_path, monkeypatch):
     routes._store_cache.clear()
     ensure_user_dirs(tmp_path / "default")
     return TestClient(app)
-
-
-def _corners_for_height(height_mm: float, f35: float, img_w: int, img_h: int) -> list[tuple[float, float]]:
-    img_diag = math.hypot(img_w, img_h)
-    sensor_diag_mm = f35 * A4_DIAG_MM / height_mm
-    diag_px = sensor_diag_mm * img_diag / FULL_FRAME_DIAG_MM
-    w = diag_px * 210 / A4_DIAG_MM
-    h = diag_px * 297 / A4_DIAG_MM
-    cx, cy = img_w / 2, img_h / 2
-    return [
-        (cx - w / 2, cy - h / 2),
-        (cx + w / 2, cy - h / 2),
-        (cx + w / 2, cy + h / 2),
-        (cx - w / 2, cy + h / 2),
-    ]
 
 
 def _jpeg_bytes(w: int, h: int, f35: float | None) -> bytes:
@@ -112,7 +94,7 @@ def _seed_session_with_upload(tmp_path, monkeypatch, f35):
 
 def test_corners_returns_and_persists_warnings(tmp_path, monkeypatch):
     client, sessions = _seed_session_with_upload(tmp_path, monkeypatch, f35=26.0)
-    corners = _corners_for_height(250.0, 26.0, 800, 600)
+    corners = corners_for_height(250.0, 26.0, 800, 600)
 
     resp = client.post(
         "/api/sessions/s1/corners",
@@ -129,7 +111,7 @@ def test_corners_returns_and_persists_warnings(tmp_path, monkeypatch):
 
 def test_corners_without_focal_length_is_graceful(tmp_path, monkeypatch):
     client, sessions = _seed_session_with_upload(tmp_path, monkeypatch, f35=None)
-    corners = _corners_for_height(250.0, 26.0, 800, 600)
+    corners = corners_for_height(250.0, 26.0, 800, 600)
 
     resp = client.post(
         "/api/sessions/s1/corners",
@@ -140,3 +122,25 @@ def test_corners_without_focal_length_is_graceful(tmp_path, monkeypatch):
     )
     assert resp.status_code == 200
     assert "camera_too_close" not in [w["code"] for w in resp.json()["warnings"]]
+
+
+def test_corners_succeeds_when_photo_checks_raise(tmp_path, monkeypatch):
+    """a broken check must not fail perspective correction."""
+    client, sessions = _seed_session_with_upload(tmp_path, monkeypatch, f35=26.0)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(routes, "check_photo", boom)
+    corners = corners_for_height(250.0, 26.0, 800, 600)
+
+    resp = client.post(
+        "/api/sessions/s1/corners",
+        json={
+            "corners": [{"x": x, "y": y} for x, y in corners],
+            "paper_size": "a4",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["warnings"] == []
+    assert sessions.get("s1").photo_warnings is None

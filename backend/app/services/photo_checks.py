@@ -44,7 +44,8 @@ def extract_focal_length_35mm(content: bytes) -> float | None:
         if value is None:
             return None
         focal = float(value)
-        return focal if focal > 0 else None
+        # crafted exif can yield inf/nan; keep those out of sessions.json
+        return focal if math.isfinite(focal) and focal > 0 else None
     except Exception:
         return None
 
