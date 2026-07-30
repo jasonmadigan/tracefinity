@@ -25,6 +25,22 @@ def client(app):
     return TestClient(app)
 
 
+@pytest.fixture()
+def _restore_secretless_app():
+    """secret tests bake PROXY_SECRET into reloaded module state; reload
+    app.config/app.main without it afterwards so later tests see clean modules."""
+    yield
+    import importlib
+
+    import app.config as config_mod
+    import app.main as main_mod
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delenv("PROXY_SECRET", raising=False)
+        importlib.reload(config_mod)
+        importlib.reload(main_mod)
+
+
 def test_starts_without_proxy_secret(client):
     """starts without auth configured."""
     resp = client.get("/health")
@@ -38,7 +54,7 @@ def test_requests_pass_through_without_proxy_secret(client):
     assert resp.status_code == 200
 
 
-def test_rejects_bad_secret_when_configured(monkeypatch):
+def test_rejects_bad_secret_when_configured(monkeypatch, _restore_secretless_app):
     """wrong secret rejected when auth is configured."""
     monkeypatch.setenv("PROXY_SECRET", "real-secret")
 
@@ -58,7 +74,7 @@ def test_rejects_bad_secret_when_configured(monkeypatch):
     assert resp.status_code == 403
 
 
-def test_accepts_correct_secret_when_configured(monkeypatch):
+def test_accepts_correct_secret_when_configured(monkeypatch, _restore_secretless_app):
     """correct secret accepted when auth is configured."""
     monkeypatch.setenv("PROXY_SECRET", "real-secret")
 
