@@ -12,6 +12,11 @@ class Point(BaseModel):
     y: float
 
 
+class PhotoWarning(BaseModel):
+    code: str
+    message: str
+
+
 class FingerHole(BaseModel):
     id: str
     x: float  # center position in pixels
