@@ -6,9 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from app.config import settings
+from app.services.store_errors import StoreClosedError
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 LOG_DATEFMT = "%H:%M:%S"
@@ -28,6 +29,13 @@ app = FastAPI(
     title="Tracefinity API",
     version=settings.app_version if settings.show_app_version else "hidden",
 )
+
+
+@app.exception_handler(StoreClosedError)
+async def _store_closed_handler(request: Request, exc: StoreClosedError):
+    # an in-flight request lost the race against user deletion; the data
+    # it targets is gone for good
+    return JSONResponse(status_code=410, content={"detail": "user data deleted"})
 
 
 @app.on_event("startup")

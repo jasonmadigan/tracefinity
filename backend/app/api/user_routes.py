@@ -14,17 +14,28 @@ router = APIRouter()
 
 
 @router.delete("/users/me")
-async def delete_user_data(request: Request, user_id: str = Depends(get_user_id)):
-    """delete all stored data for the authenticated user"""
-    # evict store caches before rmtree so a failed/partial delete cannot
-    # leave stale in-memory data that a later write resurrects to disk
-    from app.api.routes import _project_store_cache, _store_cache
-    _store_cache.pop(user_id, None)
-    _project_store_cache.pop(user_id, None)
+def delete_user_data(request: Request, user_id: str = Depends(get_user_id)):
+    """delete all stored data for the authenticated user.
 
-    user_path = settings.storage_path / user_id
-    if user_path.exists():
-        shutil.rmtree(user_path)
-        logger.info("deleted storage for user %s", user_id)
+    sync on purpose: fastapi runs it in the threadpool, so the user lock,
+    store locks and rmtree cannot stall the event loop under contention
+    """
+    from app.api.routes import _project_store_cache, _store_cache, user_lock
+
+    # the user lock blocks store creation for this user until rmtree
+    # finishes; closing the evicted stores blocks writes from references
+    # already captured by in-flight requests (issue #160)
+    with user_lock(user_id):
+        stores = _store_cache.pop(user_id, None)
+        project_store = _project_store_cache.pop(user_id, None)
+        for store in (stores or ()):
+            store.close()
+        if project_store is not None:
+            project_store.close()
+
+        user_path = settings.storage_path / user_id
+        if user_path.exists():
+            shutil.rmtree(user_path)
+            logger.info("deleted storage for user %s", user_id)
 
     return Response(status_code=204)

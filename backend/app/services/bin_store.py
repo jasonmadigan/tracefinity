@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.models.schemas import BinModel
+from app.services.store_errors import StoreClosedError
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class BinStore:
         self.file_path = storage_path / "bins.json"
         self._bins: dict[str, BinModel] = {}
         self._lock = threading.Lock()
+        self._closed = False
         self._load()
 
     def _load(self):
@@ -32,7 +34,22 @@ class BinStore:
                 logger.error(f"Failed to load {self.file_path}: {e}")
                 self._bins = {}
 
+    def close(self):
+        """block further disk writes and drop cached data; called when the
+        owning user is deleted so captured references cannot read stale data"""
+        with self._lock:
+            self._closed = True
+            self._bins = {}
+
+    def ensure_open(self):
+        """raise StoreClosedError if the owning user has been deleted"""
+        if self._closed:
+            raise StoreClosedError(f"store closed, refusing write to {self.file_path}")
+
     def _save(self):
+        # runs with self._lock held; refuse writes from references
+        # captured before user deletion (issue #160)
+        self.ensure_open()
         data = {bid: b.model_dump() for bid, b in self._bins.items()}
         temp_fd, temp_path = tempfile.mkstemp(
             dir=self.file_path.parent,
@@ -53,11 +70,15 @@ class BinStore:
 
     def set(self, bin_id: str, bin_data: BinModel):
         with self._lock:
+            # check before mutating so a refused write cannot leave a
+            # phantom record in memory
+            self.ensure_open()
             self._bins[bin_id] = bin_data
             self._save()
 
     def delete(self, bin_id: str) -> Optional[BinModel]:
         with self._lock:
+            self.ensure_open()
             bin_data = self._bins.pop(bin_id, None)
             if bin_data:
                 self._save()

@@ -5,6 +5,7 @@ import json
 import logging
 import tempfile
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 import cv2
@@ -106,16 +107,22 @@ class AITracer:
         image_path: str,
         api_key: str,
         mask_output_path: str | None = None,
+        before_mask_write: Callable[[], None] | None = None,
     ) -> tuple[list[Polygon], str | None]:
-        """trace tools via local model or gemini mask generation."""
+        """trace tools via local model or gemini mask generation.
+
+        before_mask_write runs just before the mask lands on disk; raising
+        from it aborts the write. the caller uses it to stop the mask being
+        written (and the user dir recreated) when the owning user was
+        deleted while the model call was in flight (issue #160)."""
         import os
         if os.environ.get("E2E_TEST_MODE"):
-            return self._mock_trace(mask_output_path)
+            return self._mock_trace(mask_output_path, before_mask_write)
 
         if self.uses_saliency:
-            mask_path = await self._generate_mask_saliency(image_path, mask_output_path)
+            mask_path = await self._generate_mask_saliency(image_path, mask_output_path, before_mask_write)
         else:
-            mask_path = await self._generate_mask_gemini(image_path, api_key, mask_output_path)
+            mask_path = await self._generate_mask_gemini(image_path, api_key, mask_output_path, before_mask_write)
 
         if not mask_path:
             return [], None
@@ -244,7 +251,12 @@ class AITracer:
         logging.info("generating mask via %s (%s)", cfg.provider, cfg.model)
         return await remote_saliency_mask(cfg, buf.getvalue(), pil_img.size)
 
-    async def _generate_mask_saliency(self, image_path: str, output_path: str | None = None) -> str | None:
+    async def _generate_mask_saliency(
+        self,
+        image_path: str,
+        output_path: str | None = None,
+        before_mask_write: Callable[[], None] | None = None,
+    ) -> str | None:
         """generate a foreground mask using a saliency model (local or remote).
 
         crop to the paper rect before running the model. saliency models pick
@@ -273,6 +285,8 @@ class AITracer:
         mask_out = cv2.bitwise_not(full)
 
         if output_path:
+            if before_mask_write:
+                before_mask_write()
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(output_path, mask_out)
             return output_path
@@ -281,7 +295,11 @@ class AITracer:
             cv2.imencode(".png", mask_out)[1].tofile(f)
             return f.name
 
-    def _mock_trace(self, mask_output_path: str | None) -> tuple[list[Polygon], str | None]:
+    def _mock_trace(
+        self,
+        mask_output_path: str | None,
+        before_mask_write: Callable[[], None] | None = None,
+    ) -> tuple[list[Polygon], str | None]:
         """return pre-recorded fixture data instead of calling Gemini"""
         import shutil
         fixtures = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures"
@@ -289,6 +307,8 @@ class AITracer:
         mock_json = fixtures / "mock_polygons.json"
 
         if mask_output_path and mock_mask.exists():
+            if before_mask_write:
+                before_mask_write()
             Path(mask_output_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(mock_mask), mask_output_path)
 
@@ -331,7 +351,13 @@ class AITracer:
         mime_type = self._get_media_type(image_path)
         return image_bytes, mime_type, self._mask_prompt(width, height), width, height
 
-    async def _generate_mask_gemini(self, image_path: str, api_key: str, output_path: str | None = None) -> str | None:
+    async def _generate_mask_gemini(
+        self,
+        image_path: str,
+        api_key: str,
+        output_path: str | None = None,
+        before_mask_write: Callable[[], None] | None = None,
+    ) -> str | None:
         """generate a mask via ollama, openrouter, or google sdk."""
         image_bytes, mime_type, prompt, _, _ = self._prepare_image(image_path)
 
@@ -344,6 +370,8 @@ class AITracer:
             return None
 
         if output_path:
+            if before_mask_write:
+                before_mask_write()
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             Path(output_path).write_bytes(mask_data)
             return output_path
