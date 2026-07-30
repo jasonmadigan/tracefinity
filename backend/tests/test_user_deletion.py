@@ -1,9 +1,12 @@
+import asyncio
+import io
 import json
 import shutil
 import threading
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import app.api.routes as routes
 import app.api.user_routes as user_routes
@@ -11,6 +14,7 @@ import app.main as main_mod
 from app.config import ensure_user_dirs, settings
 from app.main import app
 from app.models.schemas import BinModel, BinProject, Session, Tool
+from app.services.ai_tracer import AITracer
 from app.services.store_errors import StoreClosedError
 
 # valid cuid per auth._USER_ID_RE
@@ -156,3 +160,61 @@ def test_get_stores_during_deletion_waits_for_rmtree_and_sees_empty_state(client
     on_disk = json.loads((tmp_path / USER_ID / "bin-projects.json").read_text())
     assert old_id not in on_disk
     assert "p-new" in on_disk
+
+
+def test_delete_mid_trace_does_not_recreate_user_dir_or_mask(client, tmp_path, monkeypatch):
+    """a trace awaiting its model call must not write the mask (recreating
+    the user dir) after the user is deleted mid-flight (issue #160)"""
+    headers = {"x-user-id": USER_ID}
+    monkeypatch.setattr(settings, "tracers", None)
+    monkeypatch.setattr(settings, "google_api_key", "test-key")
+    monkeypatch.setattr(settings, "openrouter_api_key", None)
+    monkeypatch.setattr(routes, "_tracers", {})
+
+    session_id = "trace-race"
+    user_sessions, _, _ = routes.get_stores(USER_ID)
+    corrected = tmp_path / USER_ID / "processed" / "corrected.png"
+    Image.new("RGB", (64, 64), "white").save(corrected)
+    user_sessions.set(session_id, Session(
+        id=session_id,
+        corrected_image_path=f"{USER_ID}/processed/corrected.png",
+    ))
+
+    buf = io.BytesIO()
+    Image.new("L", (64, 64), 255).save(buf, format="PNG")
+    mask_bytes = buf.getvalue()
+
+    in_model = threading.Event()
+    release_model = threading.Event()
+
+    async def fake_mask(self, image_bytes, mime_type, prompt, api_key):
+        in_model.set()
+        await asyncio.to_thread(release_model.wait, 5)
+        return mask_bytes
+
+    monkeypatch.setattr(AITracer, "_mask_via_google", fake_mask)
+
+    trace_result = {}
+
+    def do_trace():
+        trace_result["resp"] = client.post(
+            f"/api/sessions/{session_id}/trace", json={}, headers=headers
+        )
+
+    tracer_thread = threading.Thread(target=do_trace)
+    tracer_thread.start()
+    assert in_model.wait(5)
+
+    # deletion completes while the model call is still awaited
+    resp = TestClient(app).delete("/api/users/me", headers=headers)
+    assert resp.status_code == 204
+    assert not (tmp_path / USER_ID).exists()
+
+    release_model.set()
+    tracer_thread.join(5)
+    assert not tracer_thread.is_alive()
+
+    # the in-flight trace must abort cleanly, not resurrect the user dir
+    assert trace_result["resp"].status_code == 410
+    assert not (tmp_path / USER_ID / "processed" / f"{session_id}_mask.png").exists()
+    assert not (tmp_path / USER_ID).exists()

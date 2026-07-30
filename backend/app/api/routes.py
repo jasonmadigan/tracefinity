@@ -87,6 +87,7 @@ from app.services.project_service import (
 from app.services.project_store import ProjectStore
 from app.services.session_store import SessionStore
 from app.services.stl_generator_manifold import ManifoldSTLGenerator
+from app.services.store_errors import StoreClosedError
 from app.services.tool_namer import name_polygons
 from app.services.tool_store import ToolStore
 from app.services.tracer_registry import TRACER_LABELS, tracer_kind, validate_tracer_ids
@@ -419,8 +420,12 @@ def _run_generate(
     user_path: Path,
     input_hash: str,
     user_id: str,
+    store: SessionStore | BinStore,
 ) -> GenerateResponse:
     """shared STL generation with caching, splitting, and zipping"""
+    # in-flight guard: the request captured its store before any awaits or
+    # threadpool hops; refuse to write outputs once the user is deleted
+    store.ensure_open()
     output_path = user_path / "outputs" / f"{entity_id}.stl"
     hash_path = user_path / "outputs" / f"{entity_id}.hash"
     threemf_path = user_path / "outputs" / f"{entity_id}.3mf"
@@ -534,6 +539,9 @@ async def upload_image(request: Request, image: UploadFile, user_id: str = Depen
 
     content, ext, _ = ingest_image(content, ext, MAX_UPLOAD_DIM)
     image_path = up / "uploads" / f"{session_id}{ext}"
+    # the awaited read can outlive a concurrent account deletion; refuse
+    # to write into the deleted user's tree
+    user_sessions.ensure_open()
     image_path.write_bytes(content)
 
     corners = image_processor.detect_paper_corners(str(image_path))
@@ -673,7 +681,12 @@ async def trace_tools(
             corrected_image_path,
             api_key,
             mask_output_path,
+            # abort the mask write (and the dir recreation it implies) if
+            # the user was deleted while the model call was in flight
+            before_mask_write=user_sessions.ensure_open,
         )
+    except StoreClosedError:
+        raise
     except TimeoutError:
         label = TRACER_LABELS.get(tracer_id, tracer_id)
         logging.warning("%s timed out", tracer_id)
@@ -730,6 +743,9 @@ async def trace_from_mask(
         raise HTTPException(status_code=400, detail="unsupported image format")
     content, mask_ext, _ = ingest_image(content, mask_ext)
     mask_path = up / "processed" / f"{session_id}_mask.png"
+    # the awaited read can outlive a concurrent account deletion; refuse
+    # to write into the deleted user's tree
+    user_sessions.ensure_open()
     mask_path.write_bytes(content)
 
     corrected_image_path = _abs(session.corrected_image_path)
@@ -790,7 +806,7 @@ def generate_stl(request: Request, session_id: str, req: GenerateRequest, user_i
         for p in scaled
     ]
 
-    response = _run_generate(scaled, req, session_id, up, input_hash, user_id)
+    response = _run_generate(scaled, req, session_id, up, input_hash, user_id, user_sessions)
 
     output_path = up / "outputs" / f"{session_id}.stl"
     fresh_session = user_sessions.get(session_id)
@@ -1650,7 +1666,7 @@ def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_u
         half_grid_base=bc.half_grid_base,
     )
 
-    response = _run_generate(scaled, gen_req, bin_id, up, input_hash, user_id)
+    response = _run_generate(scaled, gen_req, bin_id, up, input_hash, user_id, user_bins)
 
     output_path = up / "outputs" / f"{bin_id}.stl"
     fresh = user_bins.get(bin_id)
