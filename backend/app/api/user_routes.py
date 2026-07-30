@@ -21,8 +21,9 @@ async def delete_user_data(request: Request, user_id: str = Depends(get_user_id)
         shutil.rmtree(user_path)
         logger.info("deleted storage for user %s", user_id)
 
-    # evict from store cache
-    from app.api.routes import _store_cache
+    # evict from store caches so stale in-memory data cannot be rewritten to disk
+    from app.api.routes import _project_store_cache, _store_cache
     _store_cache.pop(user_id, None)
+    _project_store_cache.pop(user_id, None)
 
     return Response(status_code=204)
