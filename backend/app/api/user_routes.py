@@ -14,8 +14,12 @@ router = APIRouter()
 
 
 @router.delete("/users/me")
-async def delete_user_data(request: Request, user_id: str = Depends(get_user_id)):
-    """delete all stored data for the authenticated user"""
+def delete_user_data(request: Request, user_id: str = Depends(get_user_id)):
+    """delete all stored data for the authenticated user.
+
+    sync on purpose: fastapi runs it in the threadpool, so the user lock,
+    store locks and rmtree cannot stall the event loop under contention
+    """
     from app.api.routes import _project_store_cache, _store_cache, user_lock
 
     # the user lock blocks store creation for this user until rmtree
