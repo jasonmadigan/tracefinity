@@ -123,9 +123,14 @@ def test_half_grid_base_more_cells_than_standard(tmp_path: Path):
     # both should produce valid geometry
     assert s_body.volume() > 0
     assert h_body.volume() > 0
-    # volumes should be very close (same outer dimensions, just different base pattern)
-    ratio = h_body.volume() / s_body.volume()
-    assert 0.95 < ratio < 1.05
+    # Blank bins now generate as container cavities, so the base pattern can
+    # account for more of the remaining material than it did for solid shells.
+    # The invariant for half-grid bases is the shared outer envelope.
+    s_bb = s_body.bounding_box()
+    h_bb = h_body.bounding_box()
+    assert h_bb[3] - h_bb[0] == pytest.approx(s_bb[3] - s_bb[0])
+    assert h_bb[4] - h_bb[1] == pytest.approx(s_bb[4] - s_bb[1])
+    assert h_bb[5] - h_bb[2] == pytest.approx(s_bb[5] - s_bb[2])
 
 
 def test_half_unit_bin_correct_outer_dimensions(tmp_path: Path):
