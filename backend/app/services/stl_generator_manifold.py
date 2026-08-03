@@ -546,6 +546,27 @@ def _resolve_pocket_depth(override: float | None, config, max_depth: float) -> f
     return max(5, min(base, max_depth))
 
 
+def _make_blank_bin_cutout(config: GenerateRequest, wall_top_z: float, max_depth: float):
+    """Full-bin interior pocket for bins with no placed tools."""
+    import manifold3d as mf
+
+    outer_w = config.grid_x * GF_GRID - 0.5
+    outer_h = config.grid_y * GF_GRID - 0.5
+    wall = LIP_D0 + LIP_D2
+    inner_w = outer_w - 2 * wall
+    inner_h = outer_h - 2 * wall
+    if inner_w <= 0 or inner_h <= 0:
+        return None, 0
+
+    pocket_depth = _resolve_pocket_depth(None, config, max_depth)
+    inner_r = min(GF_CORNER_R, inner_w / 2, inner_h / 2)
+    cutter = mf.Manifold.extrude(
+        _cs(_rounded_rect_pts(inner_w, inner_h, inner_r)),
+        pocket_depth + 0.01,
+    ).translate((0.0, 0.0, wall_top_z - pocket_depth))
+    return cutter, pocket_depth
+
+
 def _filleted_rect_radius(width: float, pocket_depth: float) -> float:
     """Bottom fillet radius for the filleted-rectangle cutter profile."""
     return max(0.0, min(width / 3.0, pocket_depth / 2.0))
@@ -1379,12 +1400,13 @@ class ManifoldSTLGenerator:
             cutters.append(_make_magnet_holes(config))
 
         pocket_depth = 5
+        floor_z = GF_BASE_HEIGHT
+        lip_deduction = (LIP_D3 + LIP_D4) if config.stacking_lip else 0
+        max_depth = wall_top_z - floor_z - 2 - lip_deduction
         if polygons:
-            floor_z = GF_BASE_HEIGHT
-            lip_deduction = (LIP_D3 + LIP_D4) if config.stacking_lip else 0
-            max_depth = wall_top_z - floor_z - 2 - lip_deduction
-            # Default pocket_depth still tracks the global cutout_depth; per-cutout
-            # overrides are resolved inside the cutter functions.
+            # Default pocket_depth (used by text labels below) still tracks the
+            # global cutout_depth; per-cutout overrides are resolved inside the
+            # cutter functions via _resolve_pocket_depth.
             pocket_depth = _resolve_pocket_depth(None, config, max_depth)
 
             t1 = time.monotonic()
@@ -1409,6 +1431,12 @@ class ManifoldSTLGenerator:
                 if fh_chamfers:
                     cutters.append(fh_chamfers)
                 logger.info("chamfer cutouts: %.2fs", time.monotonic() - t1)
+        else:
+            t1 = time.monotonic()
+            blank_cutout, pocket_depth = _make_blank_bin_cutout(config, wall_top_z, max_depth)
+            if blank_cutout:
+                cutters.append(blank_cutout)
+            logger.info("blank bin cutout: %.2fs", time.monotonic() - t1)
 
         # text labels (recessed cutters + embossed body additions).
         text_body = None

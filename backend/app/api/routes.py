@@ -1593,8 +1593,6 @@ def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_u
     bin_data = user_bins.get(bin_id)
     if not bin_data:
         raise HTTPException(status_code=404, detail="bin not found")
-    if not bin_data.placed_tools:
-        raise HTTPException(status_code=400, detail="bin has no tools placed")
 
     bc = bin_data.bin_config
 
