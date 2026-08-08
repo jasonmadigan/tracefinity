@@ -13,6 +13,7 @@ image:
 env:
   GOOGLE_API_KEY: "" # Google API key for Gemini. Leave blank to disable.
   TRACERS: "" # Comma-separated list of available tracers, e.g. gemini,birefnet-lite,isnet
+  STL_GENERATION_CONCURRENCY: "" # Positive integer; empty means unlimited
   TRACEFINITY_ONNX_PROVIDER: "" # Local ONNX provider: auto, cuda, or cpu
   GEMINI_IMAGE_MODEL: "" # Gemini model for mask generation
 

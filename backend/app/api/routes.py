@@ -188,6 +188,12 @@ def _get_tracer(tracer_id: str | None = None) -> AITracer:
 
 polygon_scaler = PolygonScaler()
 stl_generator = ManifoldSTLGenerator()
+STL_GENERATION_QUEUE_TIMEOUT_SECONDS = 5.0
+_stl_generation_semaphore = (
+    threading.BoundedSemaphore(settings.stl_generation_concurrency)
+    if settings.stl_generation_concurrency is not None
+    else None
+)
 
 
 def _rel(abs_path: str | Path, user_path: Path) -> str:
@@ -432,7 +438,9 @@ def _run_generate(
     zip_path = user_path / "outputs" / f"{entity_id}_parts.zip"
     insert_path = user_path / "outputs" / f"{entity_id}_insert.stl"
 
-    if output_path.exists() and hash_path.exists() and hash_path.read_text() == input_hash:
+    def cached_response() -> GenerateResponse | None:
+        if not (output_path.exists() and hash_path.exists() and hash_path.read_text() == input_hash):
+            return None
         part_paths = sorted(user_path.glob(f"outputs/{entity_id}_part*.stl"))
         stl_urls = [f"/storage/{user_id}/outputs/{p.name}" for p in part_paths]
         insert_stl_url = (
@@ -452,6 +460,74 @@ def _run_generate(
             warning=cached_warning,
         )
 
+    cached = cached_response()
+    if cached is not None:
+        return cached
+
+    # generation is CPU- and memory-intensive. When configured, briefly wait
+    # for a process-wide slot instead of tying up a threadpool worker forever.
+    if _stl_generation_semaphore is not None:
+        acquired = _stl_generation_semaphore.acquire(
+            timeout=STL_GENERATION_QUEUE_TIMEOUT_SECONDS
+        )
+        if not acquired:
+            raise HTTPException(
+                status_code=503,
+                detail="STL generation is busy; try again shortly.",
+                headers={"Retry-After": str(int(STL_GENERATION_QUEUE_TIMEOUT_SECONDS))},
+            )
+        try:
+            # the store may have been closed while this request waited.
+            store.ensure_open()
+            # an identical request may also have populated the cache.
+            cached = cached_response()
+            if cached is not None:
+                return cached
+            return _generate_uncached(
+                scaled,
+                gen_req,
+                entity_id,
+                user_path,
+                input_hash,
+                user_id,
+                output_path,
+                hash_path,
+                threemf_path,
+                zip_path,
+                insert_path,
+            )
+        finally:
+            _stl_generation_semaphore.release()
+
+    return _generate_uncached(
+        scaled,
+        gen_req,
+        entity_id,
+        user_path,
+        input_hash,
+        user_id,
+        output_path,
+        hash_path,
+        threemf_path,
+        zip_path,
+        insert_path,
+    )
+
+
+def _generate_uncached(
+    scaled: list[ScaledPolygon],
+    gen_req: GenerateRequest,
+    entity_id: str,
+    user_path: Path,
+    input_hash: str,
+    user_id: str,
+    output_path: Path,
+    hash_path: Path,
+    threemf_path: Path,
+    zip_path: Path,
+    insert_path: Path,
+) -> GenerateResponse:
+    """Generate and persist an STL after cache and concurrency checks."""
     threemf_path.unlink(missing_ok=True)
     for old in user_path.glob(f"outputs/{entity_id}_part*.stl"):
         old.unlink(missing_ok=True)
@@ -1774,6 +1850,5 @@ async def storage_stats(request: Request):
         per_user.append({"userId": user_dir.name, "bytes": size})
 
     return {"totalBytes": total, "users": per_user}
-
 
 
