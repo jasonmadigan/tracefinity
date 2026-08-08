@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from app.services.tracer_registry import DEFAULT_LOCAL_TRACERS, validate_tracer_ids
@@ -20,6 +21,7 @@ class Settings(BaseSettings):
     gemini_image_model: str = "gemini-3.1-flash-image-preview"
     gemini_label_model: str = "gemini-2.0-flash"
     max_upload_mb: int = 20
+    stl_generation_concurrency: Optional[int] = Field(default=None, gt=0)
     log_level: str = "INFO"
     proxy_secret: Optional[str] = None
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:4001"]
