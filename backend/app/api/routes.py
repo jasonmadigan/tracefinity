@@ -5,6 +5,7 @@ import math
 import os
 import re
 import threading
+import time
 import uuid
 import zipfile
 from datetime import datetime
@@ -1833,22 +1834,40 @@ def _dir_size(path: Path) -> int:
     return total
 
 
+STORAGE_STATS_TTL_SECONDS = 60
+_storage_stats_cache: tuple[Path, float, dict] | None = None
+_storage_stats_lock = threading.Lock()
+
+
+def _storage_stats_snapshot(storage: Path) -> dict:
+    """Return briefly cached storage totals without overlapping filesystem scans."""
+    global _storage_stats_cache
+
+    now = time.monotonic()
+    with _storage_stats_lock:
+        if _storage_stats_cache is not None:
+            cached_path, cached_at, cached_result = _storage_stats_cache
+            if cached_path == storage and now - cached_at < STORAGE_STATS_TTL_SECONDS:
+                return cached_result
+
+        users = [d for d in storage.iterdir() if d.is_dir()]
+        per_user = []
+        total = 0
+        for user_dir in sorted(users):
+            size = _dir_size(user_dir)
+            total += size
+            per_user.append({"userId": user_dir.name, "bytes": size})
+
+        result = {"totalBytes": total, "users": per_user}
+        _storage_stats_cache = (storage, now, result)
+        return result
+
+
 @router.get("/admin/storage-stats")
-async def storage_stats(request: Request):
+def storage_stats(request: Request):
     if settings.proxy_secret:
         if request.headers.get("x-proxy-secret") != settings.proxy_secret:
             raise HTTPException(status_code=403)
 
-    storage = settings.storage_path
-    users = [d for d in storage.iterdir() if d.is_dir()]
-
-    per_user = []
-    total = 0
-    for user_dir in sorted(users):
-        size = _dir_size(user_dir)
-        total += size
-        per_user.append({"userId": user_dir.name, "bytes": size})
-
-    return {"totalBytes": total, "users": per_user}
-
+    return _storage_stats_snapshot(settings.storage_path)
 
