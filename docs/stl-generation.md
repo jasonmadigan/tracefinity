@@ -4,6 +4,19 @@
 
 STL generation uses manifold3d (mesh booleans, 10-100x faster than OCCT B-rep). The gridfinity shell is constructed from first principles using `CrossSection` extrusions and `batch_boolean` operations. Polygon cutouts, finger holes, magnet holes and text labels are subtracted from the bin body in one pass. Filleted rectangle cutouts use a full-depth rounded-bottom cutter profile with a dynamic fillet radius clamped by both one-third of the rectangle width and half the pocket depth.
 
+## Generation concurrency
+
+STL generation has no concurrency limit by default. Set
+`STL_GENERATION_CONCURRENCY` to a positive integer to cap simultaneous jobs
+within the backend process and reduce peak CPU and memory use. Cached results
+do not consume a generation slot. When every slot is occupied, a request waits
+up to 5 seconds; if no slot becomes available, the API returns `503 Service
+Unavailable` with `Retry-After: 5`.
+
+The limit is per process, not shared across processes or replicas. Tracefinity
+currently runs as a single backend process, so a value of `1` serializes STL
+generation for the standard deployment.
+
 ## Z-Axis Reference Heights
 
 - **Base top**: 4.75mm (three tapered layers: 2.15 + 1.8 + 0.8). Infill starts here.

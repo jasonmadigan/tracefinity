@@ -6,6 +6,7 @@
 - `POST /api/sessions/{id}/trace` - AI trace tool outlines
 - `POST /api/sessions/{id}/trace-mask` - trace from uploaded mask
 - `PUT /api/sessions/{id}/polygons` - save polygon edits
+- `POST /api/sessions/{id}/generate` - generate STL/3MF from traced polygons
 - `POST /api/sessions/{id}/save-tools` - convert traced polygons to library tools
 - `GET /api/sessions` - list sessions
 - `GET /api/sessions/{id}` - get session state
@@ -28,6 +29,11 @@ Trace and mask-trace responses include the final visible `Polygon.label` values 
 - `PUT /api/bins/{id}` - update bin
 - `DELETE /api/bins/{id}` - delete bin + output files
 - `POST /api/bins/{id}/generate` - generate STL/3MF from bin
+
+Both generation endpoints may return `503 Service Unavailable` with
+`Retry-After: 5` when `STL_GENERATION_CONCURRENCY` is configured and every
+generation slot remains occupied for 5 seconds. Cached generation responses
+bypass this queue.
 
 ## Bin projects
 - `GET /api/bin-projects` - list project summaries with tool/bin/placement counts
