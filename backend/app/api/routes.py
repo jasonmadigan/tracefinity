@@ -68,7 +68,7 @@ from app.services.ai_tracer import AITracer
 from app.services.bin_service import sync_placed_tools
 from app.services.bin_store import BinStore
 from app.services.geometry import optimal_rotation_angle as _optimal_rotation_angle
-from app.services.image_ingest import ingest_image
+from app.services.image_ingest import ImageTooLargeError, ingest_image
 from app.services.image_processor import ImageProcessor
 from app.services.image_service import generate_tool_thumbnail
 from app.services.photo_checks import check_photo, extract_focal_length_35mm
@@ -155,6 +155,20 @@ image_processor = ImageProcessor()
 
 # one AITracer per local model so each can cache its loaded model
 _tracers: dict[str, AITracer] = {}
+
+
+def _ingest_with_limits(
+    content: bytes, ext: str, max_dim: int | None = None
+) -> tuple[bytes, str, float]:
+    try:
+        return ingest_image(
+            content,
+            ext,
+            max_dim,
+            max_pixels=settings.max_image_pixels,
+        )
+    except ImageTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
 
 def _remote_token(tracer_id: str) -> str | None:
@@ -614,7 +628,7 @@ async def upload_image(request: Request, image: UploadFile, user_id: str = Depen
     # exif is dropped when the image is re-encoded, so read it first
     focal_length = extract_focal_length_35mm(content)
 
-    content, ext, _ = ingest_image(content, ext, MAX_UPLOAD_DIM)
+    content, ext, _ = _ingest_with_limits(content, ext, MAX_UPLOAD_DIM)
     image_path = up / "uploads" / f"{session_id}{ext}"
     # the awaited read can outlive a concurrent account deletion; refuse
     # to write into the deleted user's tree
@@ -667,7 +681,7 @@ async def set_corners(request: Request, session_id: str, req: CornersRequest, us
     # pixel→mm conversion stays correct after the image shrinks.
     corrected_bytes = Path(output_path).read_bytes()
     ext = Path(output_path).suffix
-    corrected_bytes, _, ds_ratio = ingest_image(corrected_bytes, ext, MAX_UPLOAD_DIM)
+    corrected_bytes, _, ds_ratio = _ingest_with_limits(corrected_bytes, ext, MAX_UPLOAD_DIM)
     Path(output_path).write_bytes(corrected_bytes)
     if ds_ratio < 1.0:
         scale_factor /= ds_ratio
@@ -818,7 +832,7 @@ async def trace_from_mask(
     mask_ext = Path(mask.filename or "mask.png").suffix.lower() or ".png"
     if mask_ext not in ALLOWED_IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="unsupported image format")
-    content, mask_ext, _ = ingest_image(content, mask_ext)
+    content, mask_ext, _ = _ingest_with_limits(content, mask_ext)
     mask_path = up / "processed" / f"{session_id}_mask.png"
     # the awaited read can outlive a concurrent account deletion; refuse
     # to write into the deleted user's tree

@@ -27,7 +27,9 @@ Warnings are advisory: you can dismiss them and continue, but retaking the photo
 
 ## Supported formats
 
-JPG, PNG, WebP, and HEIC. There is no hard file size limit, but large photos take longer to upload and process.
+JPG, PNG, WebP, and HEIC. Uploads are limited to 20 MB and 64 megapixels by
+default. Self-hosted instances can tune these limits with `MAX_UPLOAD_MB` and
+`MAX_IMAGE_PIXELS`.
 
 Images are automatically downscaled to a maximum of 2048px on the longest edge. Original uploads are deleted after perspective correction; only the corrected image is retained.
 

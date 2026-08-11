@@ -4,7 +4,7 @@ import io
 import pytest
 from PIL import Image
 
-from app.services.image_ingest import ingest_image
+from app.services.image_ingest import ImageTooLargeError, ingest_image
 
 
 def _jpeg(width: int, height: int, orientation: int | None = None) -> bytes:
@@ -59,6 +59,27 @@ class TestOrientation:
 
 
 class TestDownscale:
+    def test_normalises_pillow_decompression_bomb_error(self, monkeypatch):
+        def reject(*args, **kwargs):
+            raise Image.DecompressionBombError("too many pixels")
+
+        monkeypatch.setattr(Image, "open", reject)
+
+        with pytest.raises(
+            ImageTooLargeError,
+            match="image dimensions exceed the configured limit",
+        ):
+            ingest_image(b"not decoded", ".png")
+
+    def test_rejects_image_over_pixel_limit_before_resize(self):
+        content = _jpeg(11, 10)
+
+        with pytest.raises(
+            ImageTooLargeError,
+            match=r"image has 110 pixels; maximum is 100",
+        ):
+            ingest_image(content, ".jpg", max_dim=8, max_pixels=100)
+
     def test_ratio_matches_actual_resize(self):
         content = _jpeg(2402, 3300)
 

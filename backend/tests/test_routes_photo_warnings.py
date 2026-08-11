@@ -61,6 +61,19 @@ def test_upload_without_exif_stores_no_focal_length(tmp_path, monkeypatch):
     assert sessions.get(resp.json()["session_id"]).focal_length_35mm is None
 
 
+def test_upload_rejects_image_over_pixel_limit(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    monkeypatch.setattr(routes.settings, "max_image_pixels", 100)
+
+    resp = client.post(
+        "/api/upload",
+        files={"image": ("photo.jpg", _jpeg_bytes(11, 10, None), "image/jpeg")},
+    )
+
+    assert resp.status_code == 413
+    assert resp.json() == {"detail": "image has 110 pixels; maximum is 100"}
+
+
 def test_upload_focal_length_survives_downscale(tmp_path, monkeypatch):
     """exif is stripped when the image is re-encoded; extraction must happen first."""
     client = _client(tmp_path, monkeypatch)

@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 HEIC_EXTENSIONS = {".heic", ".heif"}
 _ORIENTATION_TAG = 0x0112
+DEFAULT_MAX_IMAGE_PIXELS = 64_000_000
+
+
+class ImageTooLargeError(ValueError):
+    """Raised before decoding an image that exceeds the pixel budget."""
+
 
 try:
     import pillow_heif
@@ -23,14 +29,31 @@ except ImportError:
     pass
 
 
-def ingest_image(content: bytes, ext: str, max_dim: int | None = None) -> tuple[bytes, str, float]:
+def ingest_image(
+    content: bytes,
+    ext: str,
+    max_dim: int | None = None,
+    max_pixels: int = DEFAULT_MAX_IMAGE_PIXELS,
+) -> tuple[bytes, str, float]:
     """normalise an uploaded image. returns (bytes, ext, downscale_ratio).
 
     HEIC becomes JPEG, EXIF orientation is applied to the pixels and the tag
     dropped, and the long edge is capped at max_dim. ratio is <1 when shrunk;
     the long edge lands exactly on max_dim so the ratio is exact for it and
     within half a pixel for the short edge (dimensions are rounded)."""
-    img = Image.open(io.BytesIO(content))
+    try:
+        img = Image.open(io.BytesIO(content))
+    except Image.DecompressionBombError as exc:
+        raise ImageTooLargeError("image dimensions exceed the configured limit") from exc
+
+    w, h = img.size
+    pixels = w * h
+    if pixels > max_pixels:
+        img.close()
+        raise ImageTooLargeError(
+            f"image has {pixels:,} pixels; maximum is {max_pixels:,}"
+        )
+
     changed = False
     new_ext = ext.lower()
 
