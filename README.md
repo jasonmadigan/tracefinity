@@ -61,6 +61,8 @@ By default, Tracefinity uses [IS-Net](https://github.com/xuebinqin/DIS) for loca
 |-|-|-|
 | `GOOGLE_API_KEY` | | Gemini API key. Uses Gemini instead of local models |
 | `TRACERS` | auto-detected | Comma-separated list of available tracers, e.g. `gemini,birefnet-lite,isnet` |
+| `MAX_UPLOAD_MB` | `20` | Maximum compressed upload size in megabytes |
+| `MAX_IMAGE_PIXELS` | `64000000` | Maximum decoded pixels accepted before downscaling |
 | `STL_GENERATION_CONCURRENCY` | unlimited | Process-wide maximum STL generation jobs; excess jobs wait up to 5 seconds, then receive 503 |
 | `TRACEFINITY_ONNX_PROVIDER` | `auto` | Local ONNX provider: `auto`, `cuda`, or `cpu` |
 | `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image-preview` | Gemini model for mask generation (see below) |

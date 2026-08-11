@@ -59,6 +59,10 @@ docker run --memory=10g -p 3000:3000 -v ./data:/app/storage ghcr.io/tracefinity/
 
 Headroom above the model figures accounts for OpenCV image processing, STL generation, and the Node.js frontend server.
 
+Uploaded photos and masks are rejected before decoding when they exceed 64
+megapixels. Set `MAX_IMAGE_PIXELS` to a positive integer to tune this limit for
+the host's available memory.
+
 STL generation is unlimited by default, preserving the fastest behavior for
 well-provisioned hosts. On memory-constrained or shared hosts, set
 `STL_GENERATION_CONCURRENCY` to a positive integer to cap the number of
