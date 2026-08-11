@@ -89,6 +89,11 @@ tracefinity/
 - **BinProject**: a planning group of tool ids and linked bin ids. Placement status is derived from linked bins (`projects.json`). Projects can carry default bin settings used when creating project bins.
 - **Session**: ephemeral, used only for upload/trace workflow. Output is tools saved to library via `save-tools`.
 
+Each record and generated file belongs to a storage namespace. Standalone
+installations always use `default`; trusted multi-user proxies configure
+`PROXY_SECRET` and send both `X-User-Id` and the matching `X-Proxy-Secret`.
+Untrusted clients cannot select arbitrary namespaces when the secret is unset.
+
 PlacedTools sync with their library source on bin load (`GET /bins/{id}`) via `bin_service.sync_placed_tools()`. Edits to a tool's points, finger holes, or name propagate to all bins that use it. The position offset is preserved.
 
 Projects do not own tools or bins. Tools keep `project_ids`, bins keep `project_id`, and project health/repair endpoints keep those links consistent when records are renamed, deleted, or manually edited.

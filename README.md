@@ -66,6 +66,7 @@ By default, Tracefinity uses [IS-Net](https://github.com/xuebinqin/DIS) for loca
 | `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image-preview` | Gemini model for mask generation (see below) |
 | `TOOL_LABEL_PROVIDER` | `none` | Optional automatic tool naming. Set to `ollama` for local vision naming |
 | `SHOW_APP_VERSION` | `true` | Show the running version in the settings popover. Set to `false` to hide it |
+| `PROXY_SECRET` | | Shared secret for a trusted multi-user reverse proxy. Leave unset for normal standalone use |
 
 ### Docker Compose
 
