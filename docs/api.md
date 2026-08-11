@@ -1,5 +1,13 @@
 # API Endpoints
 
+## User namespaces
+
+Standalone installations do not need authentication headers and store data in
+the `default` namespace. Multi-user reverse proxies can set `X-User-Id` only
+when the backend has `PROXY_SECRET` configured and the request includes the
+matching value in `X-Proxy-Secret`. API and storage requests that try to select
+a user namespace without a configured proxy secret receive `403 Forbidden`.
+
 ## Sessions (trace workflow)
 - `POST /api/upload` - upload image, auto-detect corners
 - `POST /api/sessions/{id}/corners` - set corners, apply perspective correction; returns advisory photo warnings (camera too close, paper cut off, extreme perspective)

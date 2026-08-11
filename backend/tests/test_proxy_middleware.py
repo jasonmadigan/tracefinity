@@ -1,6 +1,8 @@
-"""auth middleware: enforced when secret is configured, skipped otherwise."""
+"""trusted proxy headers are enforced without affecting standalone requests."""
 import pytest
 from starlette.testclient import TestClient
+
+FORGED_USER_ID = "forgeduser000000000000000"
 
 
 @pytest.fixture()
@@ -54,6 +56,28 @@ def test_requests_pass_through_without_proxy_secret(client):
     assert resp.status_code == 200
 
 
+def test_rejects_user_namespace_without_proxy_secret(client, tmp_path, monkeypatch):
+    """standalone clients cannot provision arbitrary user namespaces."""
+    import app.api.routes as routes
+
+    monkeypatch.setattr(routes.settings, "storage_path", tmp_path)
+    routes._store_cache.clear()
+    routes._project_store_cache.clear()
+
+    headers = {"x-user-id": FORGED_USER_ID, "x-proxy-secret": "client-supplied"}
+    resp = client.get("/api/bins", headers=headers)
+
+    assert resp.status_code == 403
+    assert client.get(f"/storage/{FORGED_USER_ID}/anything", headers=headers).status_code == 403
+    assert not (tmp_path / FORGED_USER_ID).exists()
+    assert FORGED_USER_ID not in routes._store_cache
+    assert FORGED_USER_ID not in routes._user_locks
+
+    standalone_resp = client.get("/api/bins")
+    assert standalone_resp.status_code == 200
+    assert standalone_resp.json() == {"bins": []}
+
+
 def test_rejects_bad_secret_when_configured(monkeypatch, _restore_secretless_app):
     """wrong secret rejected when auth is configured."""
     monkeypatch.setenv("PROXY_SECRET", "real-secret")
@@ -74,21 +98,26 @@ def test_rejects_bad_secret_when_configured(monkeypatch, _restore_secretless_app
     assert resp.status_code == 403
 
 
-def test_accepts_correct_secret_when_configured(monkeypatch, _restore_secretless_app):
+def test_accepts_correct_secret_when_configured(monkeypatch, tmp_path, _restore_secretless_app):
     """correct secret accepted when auth is configured."""
     monkeypatch.setenv("PROXY_SECRET", "real-secret")
 
     import importlib
 
+    import app.api.routes as routes_mod
     import app.config as config_mod
     import app.main as main_mod
 
     importlib.reload(config_mod)
     importlib.reload(main_mod)
+    monkeypatch.setattr(routes_mod.settings, "storage_path", tmp_path)
+    routes_mod._store_cache.clear()
+    routes_mod._project_store_cache.clear()
 
     client = TestClient(main_mod.app)
     resp = client.get(
-        "/health",
-        headers={"x-user-id": "u1", "x-proxy-secret": "real-secret"},
+        "/api/bins",
+        headers={"x-user-id": FORGED_USER_ID, "x-proxy-secret": "real-secret"},
     )
     assert resp.status_code == 200
+    assert (tmp_path / FORGED_USER_ID).is_dir()

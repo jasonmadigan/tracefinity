@@ -47,10 +47,14 @@ def _configure_uvicorn_logging():
 
 
 class ProxySecretMiddleware(BaseHTTPMiddleware):
-    """reject requests with X-User-Id but wrong/missing proxy secret"""
+    """only trust user-scoped headers from an authenticated proxy."""
 
     async def dispatch(self, request: Request, call_next):
         if not settings.proxy_secret:
+            path = request.url.path
+            user_scoped_path = path in ("/api", "/storage") or path.startswith(("/api/", "/storage/"))
+            if user_scoped_path and request.headers.get("x-user-id"):
+                return Response(status_code=403)
             return await call_next(request)
         if request.headers.get("x-user-id"):
             if request.headers.get("x-proxy-secret") != settings.proxy_secret:
