@@ -27,5 +27,7 @@ jobs:
         with:
           version: 10
       - run: cd frontend && pnpm install --frozen-lockfile
+      - run: cd frontend && pnpm exec next typegen
+      - run: git diff --exit-code -- frontend/next-env.d.ts
       - run: cd frontend && pnpm run lint
       - run: cd frontend && pnpm exec tsc --noEmit
