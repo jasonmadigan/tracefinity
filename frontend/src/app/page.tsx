@@ -15,6 +15,8 @@ import { GRID_UNIT } from '@/lib/constants'
 import { getDefaultBinDefaults } from '@/lib/binDefaults'
 import { useDeleteConfirmation } from '@/hooks/useDeleteConfirmation'
 import { projectNameMap, projectStatusLabels, toolProjectLabel, toolProjectTitle } from '@/lib/projectSelectors'
+import { filterToolsByStatus, getToolQuickFilterCounts } from '@/lib/toolFilters'
+import type { ToolQuickFilter } from '@/lib/toolFilters'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 
@@ -258,6 +260,7 @@ export default function HomePage() {
   const [projectStatusFilter, setProjectStatusFilter] = useState<ProjectStatus | 'all'>('all')
   const [toolSearch, setToolSearch] = useState('')
   const [toolSort, setToolSort] = useState('date')
+  const [toolQuickFilter, setToolQuickFilter] = useState<ToolQuickFilter>('all')
   const [collapsedSections, setCollapsedSections] = useState<MainSectionCollapseState>(loadSectionCollapseState)
 
   const hasData = toolsList.length > 0 || binsList.length > 0 || projectsList.length > 0
@@ -302,7 +305,7 @@ export default function HomePage() {
   }, [binsList])
 
   const filteredTools = useMemo(() => {
-    let list = toolsList
+    let list = filterToolsByStatus(toolsList, toolQuickFilter, projectBinToolIds)
     if (toolSearch.trim()) {
       const q = toolSearch.toLowerCase()
       list = list.filter(t => t.name.toLowerCase().includes(q))
@@ -311,7 +314,16 @@ export default function HomePage() {
       list = [...list].sort((a, b) => a.name.localeCompare(b.name))
     }
     return list
-  }, [toolsList, toolSearch, toolSort])
+  }, [toolsList, projectBinToolIds, toolQuickFilter, toolSearch, toolSort])
+
+  const toolQuickFilterOptions = useMemo(() => {
+    const counts = getToolQuickFilterCounts(toolsList, projectBinToolIds)
+    return [
+      { value: 'all' as const, label: 'All', count: counts.all },
+      { value: 'placed' as const, label: 'Placed', count: counts.placed },
+      { value: 'unassigned' as const, label: 'Unassigned', count: counts.unassigned },
+    ]
+  }, [toolsList, projectBinToolIds])
 
   function setSectionCollapsed(section: MainSectionId, collapsed: boolean) {
     setCollapsedSections(prev => {
@@ -462,10 +474,10 @@ export default function HomePage() {
                       <button
                         key={option.value}
                         onClick={() => setProjectStatusFilter(option.value)}
-                        className={`flex-shrink-0 rounded-[7px] px-2.5 py-1 text-[11px] transition-colors cursor-pointer ${
+                        className={`glass-sm flex-shrink-0 rounded-[7px] px-2.5 py-1 text-[11px] transition-colors cursor-pointer ${
                           isActive
                             ? 'bg-accent-muted text-accent'
-                            : 'glass-sm text-text-secondary hover:bg-glass-hover'
+                            : 'text-text-secondary hover:bg-glass-hover'
                         }`}
                       >
                         {option.label}
@@ -549,15 +561,41 @@ export default function HomePage() {
       {toolsList.length > 0 && (
         <div>
           <SectionHeader
-            title="Tools" count={toolsList.length}
+            title="Tools" count={filteredTools.length}
             search={toolSearch} onSearchChange={setToolSearch}
             sortKey={toolSort} onSortChange={setToolSort}
             collapsed={collapsedSections.tools}
             onToggleCollapsed={() => setSectionCollapsed('tools', !collapsedSections.tools)}
           />
           {!collapsedSections.tools && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {filteredTools.map(tool => {
+          <>
+            <div
+              role="group"
+              aria-label="Filter tools by status"
+              className="mb-3 flex min-w-0 items-center gap-1.5 overflow-x-auto pb-0.5"
+            >
+              {toolQuickFilterOptions.map(option => {
+                const isActive = toolQuickFilter === option.value
+                return (
+                  <button
+                    key={option.value}
+                    onClick={() => setToolQuickFilter(option.value)}
+                    aria-pressed={isActive}
+                    className={`glass-sm flex-shrink-0 rounded-[7px] px-2.5 py-1 text-[11px] transition-colors cursor-pointer ${
+                      isActive
+                        ? 'bg-accent-muted text-accent'
+                        : 'text-text-secondary hover:bg-glass-hover'
+                    }`}
+                  >
+                    {option.label}
+                    <span className="ml-1 text-[10px] text-text-muted">{option.count}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {filteredTools.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+              {filteredTools.map(tool => {
                 const projectLabel = toolProjectLabel(tool.project_ids, projectNameById)
                 const projectTitle = toolProjectTitle(tool.project_ids, projectNameById)
                 const primaryProjectId = tool.project_ids[0]
@@ -651,7 +689,13 @@ export default function HomePage() {
                   </div>
                 )
               })}
-          </div>
+              </div>
+            ) : (
+              <div className="glass rounded-[8px] p-6 text-center">
+                <p className="text-xs text-text-muted">No tools match this filter.</p>
+              </div>
+            )}
+          </>
           )}
         </div>
       )}

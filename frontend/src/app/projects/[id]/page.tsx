@@ -535,10 +535,10 @@ export default function ProjectPage() {
                 <button
                   key={key}
                   onClick={() => setStatusFilter(key as ProjectToolFilter)}
-                  className={`rounded-[7px] px-2 py-1 text-[11px] transition-colors cursor-pointer ${
+                  className={`glass-sm rounded-[7px] px-2 py-1 text-[11px] transition-colors cursor-pointer ${
                     statusFilter === key
                       ? 'bg-accent-muted text-accent'
-                      : 'glass-sm text-text-secondary hover:bg-glass-hover'
+                      : 'text-text-secondary hover:bg-glass-hover'
                   }`}
                 >
                   {label}
