@@ -6,6 +6,8 @@ import {
   addToolsToProject,
   addBinsToProject,
   createProjectBin,
+  createProjectSketch,
+  deleteProjectSketch,
   getProject,
   getProjectHealth,
   listProjects,
@@ -35,18 +37,19 @@ import {
   toolProjectLabel,
   type ProjectToolFilter,
 } from '@/lib/projectSelectors'
-import { AlertTriangle, ArrowLeft, CheckSquare, ChevronDown, ChevronRight, Loader2, Package, Plus, Search, Square, Trash2, Unlink } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckSquare, ChevronDown, ChevronRight, LayoutGrid, Loader2, Package, Plus, Search, Square, Trash2, Unlink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 
 const PROJECT_SECTION_COLLAPSE_KEY = 'tracefinity.project.collapsedSections'
-type ProjectSectionId = 'binDefaults' | 'projectTools' | 'linkedBins'
+type ProjectSectionId = 'binDefaults' | 'projectTools' | 'linkedBins' | 'sketches'
 type ProjectSectionCollapseState = Record<ProjectSectionId, boolean>
 
 const defaultProjectSectionCollapse: ProjectSectionCollapseState = {
   binDefaults: true,
   projectTools: false,
   linkedBins: false,
+  sketches: false,
 }
 
 function loadProjectSectionCollapseState(): ProjectSectionCollapseState {
@@ -89,6 +92,8 @@ export default function ProjectPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [creatingBin, setCreatingBin] = useState(false)
+  const [creatingSketch, setCreatingSketch] = useState(false)
+  const { deleteTarget: deleteSketchId, requestDelete: requestSketchDelete, clearDelete: clearSketchDelete } = useDeleteConfirmation<string>()
   const { deleteTarget: deleteBinId, requestDelete: requestBinDelete, clearDelete: clearBinDelete } = useDeleteConfirmation<string>()
   const [error, setError] = useState<string | null>(null)
 
@@ -308,6 +313,35 @@ export default function ProjectPage() {
       setError(err instanceof Error ? err.message : 'failed to create bin')
     } finally {
       setCreatingBin(false)
+    }
+  }
+
+  async function handleCreateSketch() {
+    if (!project) return
+    setCreatingSketch(true)
+    setError(null)
+    try {
+      const sketch = await createProjectSketch(project.id)
+      router.push(`/projects/${project.id}/sketch/${sketch.id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to create drawer plan')
+    } finally {
+      setCreatingSketch(false)
+    }
+  }
+
+  async function handleDeleteSketch() {
+    if (!project || !deleteSketchId) return
+    setSaving(true)
+    setError(null)
+    try {
+      await deleteProjectSketch(project.id, deleteSketchId)
+      setProject({ ...project, sketches: project.sketches.filter(sketch => sketch.id !== deleteSketchId) })
+      clearSketchDelete()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to delete drawer plan')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -905,6 +939,65 @@ export default function ProjectPage() {
         )}
       </section>
 
+      <section>
+        <SectionHeader
+          title="Drawer plans"
+          count={project.sketches.length}
+          collapsed={collapsedSections.sketches}
+          onToggleCollapsed={() => setSectionCollapsed('sketches', !collapsedSections.sketches)}
+        >
+          <button
+            onClick={handleCreateSketch}
+            disabled={creatingSketch}
+            className="btn-secondary px-2 py-1 text-[11px] inline-flex items-center gap-1"
+          >
+            {creatingSketch ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+            New plan
+          </button>
+        </SectionHeader>
+        {!collapsedSections.sketches && (
+          project.sketches.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {project.sketches.map(sketch => {
+                const placedBinIds = new Set(sketch.bin_layout.map(placement => placement.bin_id))
+                const sized = sketch.target_grid_x !== null && sketch.target_grid_y !== null
+                return (
+                  <div key={sketch.id} className="glass rounded-[8px] px-3 py-2 flex items-center gap-2">
+                    <button
+                      onClick={() => router.push(`/projects/${project.id}/sketch/${sketch.id}`)}
+                      className="min-w-0 flex-1 text-left cursor-pointer"
+                    >
+                      <span className="block text-xs text-text-primary truncate">{sketch.name}</span>
+                      <span className="block text-[10px] text-text-muted">
+                        {sized ? `${sketch.target_grid_x}x${sketch.target_grid_y} units` : 'No drawer size'}
+                        {' · '}
+                        {sketch.bin_layout.length} placement{sketch.bin_layout.length !== 1 ? 's' : ''}
+                        {placedBinIds.size > 0 ? ` · ${placedBinIds.size} of ${projectBins.length} bins` : ''}
+                      </span>
+                    </button>
+                    <LayoutGrid className="w-4 h-4 text-text-muted flex-shrink-0" />
+                    <button
+                      onClick={() => requestSketchDelete(sketch.id)}
+                      disabled={saving}
+                      className="btn-danger-icon flex-shrink-0"
+                      title="Delete drawer plan"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="glass rounded-[8px] p-6 text-center">
+              <p className="text-xs text-text-muted">
+                No drawer plans yet. Create one to arrange this project&apos;s bins in a drawer.
+              </p>
+            </div>
+          )
+        )}
+      </section>
+
       <ConfirmModal
         open={deleteBinId !== null}
         title="Delete bin?"
@@ -913,6 +1006,16 @@ export default function ProjectPage() {
         variant="danger"
         onConfirm={handleDeleteBin}
         onCancel={clearBinDelete}
+      />
+
+      <ConfirmModal
+        open={deleteSketchId !== null}
+        title="Delete drawer plan?"
+        message="This removes the plan and its bin placements. The bins themselves stay in the project."
+        confirmText="Delete"
+        variant="danger"
+        onConfirm={handleDeleteSketch}
+        onCancel={clearSketchDelete}
       />
     </div>
   )

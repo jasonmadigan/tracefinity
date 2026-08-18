@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
+import uuid
 from typing import Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.constants import PaperSize
 
@@ -351,6 +353,84 @@ ProjectHealthCode = Literal[
     "tool_extra_project_id",
 ]
 
+# a project grid describes a whole drawer, so it is much larger than a single bin
+MAX_TARGET_GRID = 40
+
+
+def _check_target_grid(v: float | None) -> float | None:
+    """Validate an optional drawer grid size in gridfinity units."""
+    if v is None:
+        return v
+    if v < 1 or v > MAX_TARGET_GRID:
+        raise ValueError(f"grid size must be between 1 and {MAX_TARGET_GRID}")
+    if v * 2 != int(v * 2):
+        raise ValueError("grid size must be a multiple of 0.5")
+    return v
+
+
+PLACEMENT_ROTATIONS = (0, 90, 180, 270)
+
+
+class ProjectBinPlacement(BaseModel):
+    """Position of one bin on the project drawer grid, in gridfinity units from the top-left.
+
+    A bin may be placed more than once, so placements carry their own id.
+    """
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    bin_id: str
+    x: float = 0
+    y: float = 0
+    rotation: int = 0  # 90 and 270 swap the bin footprint
+    color: str | None = None  # #rrggbb highlight; None uses the default bin colour
+
+    @field_validator("color")
+    @classmethod
+    def validate_color(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        value = v.strip().lower()
+        if not re.fullmatch(r"#[0-9a-f]{6}", value):
+            raise ValueError("colour must be a #rrggbb hex value")
+        return value
+
+    @field_validator("x", "y")
+    @classmethod
+    def validate_offset(cls, v: float) -> float:
+        if v < 0 or v > MAX_TARGET_GRID:
+            raise ValueError(f"placement offset must be between 0 and {MAX_TARGET_GRID}")
+        if v * 2 != int(v * 2):
+            raise ValueError("placement offset must be a multiple of 0.5")
+        return v
+
+    @field_validator("rotation")
+    @classmethod
+    def validate_rotation(cls, v: int) -> int:
+        if v not in PLACEMENT_ROTATIONS:
+            raise ValueError("placement rotation must be 0, 90, 180 or 270")
+        return v
+
+
+DEFAULT_SKETCH_NAME = "Drawer plan"
+
+
+class ProjectSketch(BaseModel):
+    """One drawer plan: a grid plus the bins placed on it. A project may hold several."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = DEFAULT_SKETCH_NAME
+    target_grid_x: float | None = None
+    target_grid_y: float | None = None
+    bin_layout: list[ProjectBinPlacement] = []
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    @field_validator("target_grid_x", "target_grid_y")
+    @classmethod
+    def validate_target_grid(cls, v: float | None) -> float | None:
+        return _check_target_grid(v)
+
+
 class BinProject(BaseModel):
     id: str
     name: str
@@ -358,23 +438,37 @@ class BinProject(BaseModel):
     status: ProjectStatus = "active"
     tool_ids: list[str] = []
     bin_ids: list[str] = []
-    target_grid_x: float | None = None
-    target_grid_y: float | None = None
+    sketches: list[ProjectSketch] = []
     default_bin_config: BinDefaults | None = None
     notes: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
-    @field_validator("target_grid_x", "target_grid_y")
+    @model_validator(mode="before")
     @classmethod
-    def validate_target_grid(cls, v: float | None) -> float | None:
-        if v is None:
-            return v
-        if v < 1 or v > 10:
-            raise ValueError("grid size must be between 1 and 10")
-        if v * 2 != int(v * 2):
-            raise ValueError("grid size must be a multiple of 0.5")
-        return v
+    def migrate_single_sketch(cls, data):
+        """Fold a pre-multi-sketch record (grid + layout on the project) into one sketch."""
+        if not isinstance(data, dict):
+            return data
+        legacy_keys = ("target_grid_x", "target_grid_y", "bin_layout")
+        if not any(key in data for key in legacy_keys):
+            return data
+
+        data = dict(data)
+        grid_x = data.pop("target_grid_x", None)
+        grid_y = data.pop("target_grid_y", None)
+        layout = data.pop("bin_layout", None) or []
+        if not data.get("sketches") and (layout or grid_x is not None or grid_y is not None):
+            data["sketches"] = [{
+                "name": DEFAULT_SKETCH_NAME,
+                "target_grid_x": grid_x,
+                "target_grid_y": grid_y,
+                "bin_layout": layout,
+                "created_at": data.get("created_at"),
+                "updated_at": data.get("updated_at"),
+            }]
+        return data
+
 
 class BinProjectDetail(BinProject):
     placed_tool_ids: list[str] = []
@@ -390,8 +484,7 @@ class BinProjectSummary(BaseModel):
     bin_count: int = 0
     placed_count: int = 0
     unplaced_count: int = 0
-    target_grid_x: float | None = None
-    target_grid_y: float | None = None
+    sketch_count: int = 0
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -404,43 +497,40 @@ class BinProjectCreateRequest(BaseModel):
     name: str
     description: str | None = None
     status: ProjectStatus = "active"
-    target_grid_x: float | None = None
-    target_grid_y: float | None = None
     default_bin_config: BinDefaults | None = None
     notes: str | None = None
     tool_ids: list[str] = []
-
-    @field_validator("target_grid_x", "target_grid_y")
-    @classmethod
-    def validate_target_grid(cls, v: float | None) -> float | None:
-        if v is None:
-            return v
-        if v < 1 or v > 10:
-            raise ValueError("grid size must be between 1 and 10")
-        if v * 2 != int(v * 2):
-            raise ValueError("grid size must be a multiple of 0.5")
-        return v
 
 
 class BinProjectUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     status: ProjectStatus | None = None
-    target_grid_x: float | None = None
-    target_grid_y: float | None = None
     default_bin_config: BinDefaults | None = None
     notes: str | None = None
+
+
+class ProjectSketchCreateRequest(BaseModel):
+    name: str | None = None
+    target_grid_x: float | None = None
+    target_grid_y: float | None = None
 
     @field_validator("target_grid_x", "target_grid_y")
     @classmethod
     def validate_target_grid(cls, v: float | None) -> float | None:
-        if v is None:
-            return v
-        if v < 1 or v > 10:
-            raise ValueError("grid size must be between 1 and 10")
-        if v * 2 != int(v * 2):
-            raise ValueError("grid size must be a multiple of 0.5")
-        return v
+        return _check_target_grid(v)
+
+
+class ProjectSketchUpdateRequest(BaseModel):
+    name: str | None = None
+    target_grid_x: float | None = None
+    target_grid_y: float | None = None
+    bin_layout: list[ProjectBinPlacement] | None = None
+
+    @field_validator("target_grid_x", "target_grid_y")
+    @classmethod
+    def validate_target_grid(cls, v: float | None) -> float | None:
+        return _check_target_grid(v)
 
 
 class BinProjectToolsRequest(BaseModel):
@@ -517,6 +607,8 @@ class BinSummary(BaseModel):
     has_stl: bool
     grid_x: float = 2
     grid_y: float = 2
+    height_units: int = 4
+    half_grid_base: bool = False
     preview_tools: list[BinPreviewTool] = []
 
 

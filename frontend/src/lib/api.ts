@@ -13,7 +13,9 @@ import type {
   ToolSummary,
   BinProject,
   BinProjectSummary,
+  ProjectBinPlacement,
   ProjectHealthResponse,
+  ProjectSketch,
   ProjectStatus,
   BinData,
   BinSummary,
@@ -272,8 +274,6 @@ export async function updateProject(
     description?: string | null
     status?: ProjectStatus
     notes?: string | null
-    target_grid_x?: number | null
-    target_grid_y?: number | null
     default_bin_config?: BinDefaults | null
   }
 ): Promise<BinProject> {
@@ -281,6 +281,36 @@ export async function updateProject(
     method: 'PATCH',
     body: JSON.stringify(updates),
   })
+}
+
+export async function createProjectSketch(
+  projectId: string,
+  sketch: { name?: string; target_grid_x?: number | null; target_grid_y?: number | null } = {},
+): Promise<ProjectSketch> {
+  return fetchApi(`/api/bin-projects/${projectId}/sketches`, {
+    method: 'POST',
+    body: JSON.stringify(sketch),
+  })
+}
+
+export async function updateProjectSketch(
+  projectId: string,
+  sketchId: string,
+  updates: {
+    name?: string
+    target_grid_x?: number | null
+    target_grid_y?: number | null
+    bin_layout?: ProjectBinPlacement[]
+  },
+): Promise<ProjectSketch> {
+  return fetchApi(`/api/bin-projects/${projectId}/sketches/${sketchId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  })
+}
+
+export async function deleteProjectSketch(projectId: string, sketchId: string): Promise<void> {
+  await fetchApi(`/api/bin-projects/${projectId}/sketches/${sketchId}`, { method: 'DELETE' })
 }
 
 export async function deleteProject(projectId: string): Promise<void> {

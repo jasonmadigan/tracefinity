@@ -97,6 +97,20 @@ Reference for AI agents. Check here before suggesting new features or claiming s
 - Bin import (with/without tool reassignment)
 - Filter tool library by project membership
 
+## Drawer Planning
+
+- Several drawer plans per project, each with its own name and grid
+- Optional drawer grid size per plan (width/depth in gridfinity units)
+- 2D top-down drawer sketch with bin footprints, tool outlines and bin height indicators
+- 3D drawer view rendering the generated bin models, with the same camera presets and edge display as the bin preview
+- Drag and drop bins from the project bin list onto the grid
+- Drag to move, rotate in 90 degree steps, duplicate, remove placements
+- Same bin can be placed multiple times
+- Snapping follows each bin's base: full units, or half units for half-grid bins
+- Per-bin highlight colours
+- Auto arrange (largest bins first) and space usage stats
+- Overlap and out-of-drawer warnings
+
 ## Tool Library
 
 - Search by name

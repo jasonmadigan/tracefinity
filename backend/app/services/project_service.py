@@ -7,8 +7,10 @@ from app.models.schemas import (
     BinProject,
     BinProjectDetail,
     BinProjectSummary,
+    ProjectBinPlacement,
     ProjectHealthIssue,
     ProjectHealthResponse,
+    ProjectSketch,
 )
 from app.services.bin_store import BinStore
 from app.services.project_store import ProjectStore
@@ -57,8 +59,7 @@ def make_project_summary(project: BinProject, user_bins: BinStore) -> BinProject
         bin_count=len(linked_bins),
         placed_count=len(status["placed_tool_ids"]),
         unplaced_count=len(status["unplaced_tool_ids"]),
-        target_grid_x=project.target_grid_x,
-        target_grid_y=project.target_grid_y,
+        sketch_count=len(project.sketches),
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
@@ -69,6 +70,52 @@ def make_project_detail(project: BinProject, user_bins: BinStore) -> BinProjectD
         **project.model_dump(),
         **project_status(project, project_linked_bins(project, user_bins)),
     )
+
+
+def validate_bin_layout(
+    project: BinProject,
+    placements: list[ProjectBinPlacement],
+    user_bins: BinStore,
+) -> list[ProjectBinPlacement]:
+    """Check that every placement targets a linked bin and has a unique id.
+
+    The same bin may appear several times -- one drawer can hold copies of a bin.
+    """
+    linked_bin_ids = {bin_data.id for bin_data in project_linked_bins(project, user_bins)}
+    seen: set[str] = set()
+    layout: list[ProjectBinPlacement] = []
+    for placement in placements:
+        if placement.bin_id not in linked_bin_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"bin {placement.bin_id} is not linked to this project",
+            )
+        if placement.id in seen:
+            raise HTTPException(
+                status_code=400,
+                detail=f"duplicate placement id {placement.id}",
+            )
+        seen.add(placement.id)
+        layout.append(placement)
+    return layout
+
+
+def get_sketch(project: BinProject, sketch_id: str) -> ProjectSketch:
+    for sketch in project.sketches:
+        if sketch.id == sketch_id:
+            return sketch
+    raise HTTPException(status_code=404, detail="sketch not found")
+
+
+def drop_bins_from_layout(project: BinProject, bin_ids: set[str]) -> bool:
+    """Remove placements for bins that left the project. Returns True when changed."""
+    changed = False
+    for sketch in project.sketches:
+        remaining = [p for p in sketch.bin_layout if p.bin_id not in bin_ids]
+        if len(remaining) != len(sketch.bin_layout):
+            sketch.bin_layout = remaining
+            changed = True
+    return changed
 
 
 def add_project_to_tools(project_id: str, tool_ids: list[str], user_tools: ToolStore):
@@ -105,16 +152,24 @@ def remove_bin_from_project(project_store: ProjectStore, project_id: str | None,
     if not project_id:
         return
     project = project_store.get(project_id)
-    if project and bin_id in project.bin_ids:
+    if not project:
+        return
+    dropped = drop_bins_from_layout(project, {bin_id})
+    if bin_id in project.bin_ids:
         project.bin_ids = [bid for bid in project.bin_ids if bid != bin_id]
+        dropped = True
+    if dropped:
         project.updated_at = now_iso()
         project_store.set(project_id, project)
 
 
 def remove_bin_from_all_projects(project_store: ProjectStore, bin_id: str):
     for project_id, project in project_store.all().items():
+        dropped = drop_bins_from_layout(project, {bin_id})
         if bin_id in project.bin_ids:
             project.bin_ids = [bid for bid in project.bin_ids if bid != bin_id]
+            dropped = True
+        if dropped:
             project.updated_at = now_iso()
             project_store.set(project_id, project)
 
@@ -249,6 +304,14 @@ def repair_project_links(
         elif bin_id in linked_bin_ids and bin_data.project_id is None:
             bin_data.project_id = project.id
             user_bins.set(bin_id, bin_data)
+
+    stale_placements = {
+        placement.bin_id
+        for sketch in project.sketches
+        for placement in sketch.bin_layout
+        if placement.bin_id not in linked_bin_ids
+    }
+    drop_bins_from_layout(project, stale_placements)
 
     project.updated_at = now_iso()
     project_store.set(project.id, project)

@@ -84,3 +84,44 @@ When health issues are detected and some are repairable, a **Repair links** butt
 ## Bin contents
 
 Expand a linked bin to see which tools are placed in it. Tools from outside the project are flagged with a warning.
+
+## Drawer plans
+
+The **Drawer plans** section at the bottom of the project page lists every plan for this project. Click **New plan** to add one -- a project can hold as many as you like, for example one per drawer or a few variants of the same drawer you want to compare. Click a plan to open it, rename it by clicking its name in the breadcrumb, and delete it with the trash icon. Deleting a plan only removes the arrangement; the bins stay in the project.
+
+### Setting the drawer size
+
+The drawer size is optional. Click **Set drawer size** and enter the width and depth in gridfinity units (1 to 40, in 0.5 steps). The sidebar shows the equivalent millimetres, so a 420 x 336 mm drawer is 10 x 8 units. **Clear drawer size** removes the plan again.
+
+Bins snap to whole gridfinity units. A bin configured with a **half-grid base** snaps to half units instead, matching the 21mm cells it actually sits on -- there is nothing to switch on in the planner.
+
+### Placing bins
+
+- Drag a bin from the **Project bins** list onto the grid.
+- Or click the **+** icon to drop it into the first free spot.
+- Drag a placed bin to move it.
+- **R** or the rotate icon turns a bin by 90 degrees, cycling through 0, 90, 180 and 270.
+- **D** or the copy icon duplicates the selected bin.
+- **Delete** or the trash icon takes it back out of the drawer.
+
+A bin can be placed as often as you like -- the list shows how many copies of it are in the drawer, and the **x** icon next to a bin removes all of them at once.
+
+### Highlight colours
+
+The palette icon next to a bin sets a highlight colour for every copy of that bin; the swatches in the bar below the canvas recolour just the selected one. The palette follows the Chart.js default colours, with the Tracefinity blue as the default swatch. Colours show up in both views, which helps when you want to mark, say, everything that still needs printing. Bins that overlap or hang out of the drawer are drawn red and amber with a dashed outline, regardless of their colour.
+
+Each placed bin shows the outlines of the tools it contains and a small stack of bars in the corner marking its height in gridfinity units, so you can see at a glance whether a rearrangement is worth reprinting.
+
+### Auto arrange
+
+**Auto arrange** packs all project bins into the drawer, largest first, rotating them when that helps. Bins that do not fit are left in the list as unplaced.
+
+### Space usage
+
+The sidebar tracks how many grid units are used and free, how many bins are placed, and warns when bins overlap or stick out of the drawer. Overlapping bins are outlined in red, bins outside the drawer in amber.
+
+### 2D and 3D
+
+Switch between the top-down sketch and a 3D view with the buttons above the canvas. The 3D view renders the actual bin models, the same geometry you would print, so you can check tool pockets, heights and reach. It uses the same controls as the bin preview: camera presets (home, top, front, right, fit) and a toggle that switches from solid models to contour lines only. Models are generated on demand the first time you open the 3D view; until a model is ready, the bin shows as a translucent block.
+
+The plan saves automatically and is stored with the project.
