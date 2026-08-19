@@ -5,10 +5,11 @@ export function useDebouncedSave(
   deps: unknown[],
   delay: number = 150,
   options?: { skipInitial?: boolean }
-): { saving: boolean; saved: boolean; saveCount: number } {
+): { saving: boolean; saved: boolean; saveCount: number; error: Error | null } {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveCount, setSaveCount] = useState(0)
+  const [error, setError] = useState<Error | null>(null)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const pendingSaveRef = useRef<(() => void) | null>(null)
   const savedTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -34,10 +35,12 @@ export function useDebouncedSave(
         await saveFnRef.current()
         setSaveCount(c => c + 1)
         setSaved(true)
+        setError(null)
         if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
         savedTimerRef.current = setTimeout(() => setSaved(false), 2000)
-      } catch {
-        // ignore
+      } catch (err) {
+        // surfaced to the caller: a silent failure looks identical to a save
+        setError(err instanceof Error ? err : new Error('save failed'))
       } finally {
         setSaving(false)
       }
@@ -61,5 +64,5 @@ export function useDebouncedSave(
     return () => window.removeEventListener('beforeunload', flush)
   }, [])
 
-  return { saving, saved, saveCount }
+  return { saving, saved, saveCount, error }
 }

@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install backend
         run: cd backend && python -m venv venv && . venv/bin/activate && pip install -r requirements.txt
@@ -27,8 +29,25 @@ jobs:
       - name: Install frontend
         run: cd frontend && pnpm install --frozen-lockfile
 
+      # browsers are re-downloaded every run without this, and --with-deps
+      # shells out to apt, which can stall indefinitely. the step timeout turns
+      # that into an honest failure instead of eating the whole job budget
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+
       - name: Install Playwright
-        run: cd frontend && pnpm exec playwright install --with-deps chromium
+        timeout-minutes: 5
+        run: |
+          cd frontend
+          if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
+            pnpm exec playwright install chromium
+          else
+            pnpm exec playwright install --with-deps chromium
+          fi
 
       - name: Run tests
         run: cd frontend && pnpm exec playwright test
