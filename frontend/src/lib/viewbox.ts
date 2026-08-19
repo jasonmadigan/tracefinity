@@ -46,3 +46,18 @@ export function zoomAtCursor(
   const next = viewBoxPoint(zoomedViewBox(width, height, newZoom, pan), fx, fy)
   return { x: pan.x + (cur.x - next.x), y: pan.y + (cur.y - next.y) }
 }
+
+// fallback view width, used only until the rendered size has been measured
+export const BASE_VIEW_WIDTH = 800
+
+// scale factor that makes one SVG user unit render as one CSS pixel.
+// renderedWidth must be the measured width of the element the viewBox is
+// painted into: a portrait image is height-constrained, so assuming a fixed
+// view width gives sub-pixel strokes and handles. divided by zoom so both keep
+// a constant on-screen size as the viewBox shrinks.
+export function uiScaleFor(imageWidth: number, renderedWidth: number, zoom: number): number {
+  if (zoom <= 0) return 1
+  if (renderedWidth > 0 && imageWidth > 0) return imageWidth / renderedWidth / zoom
+  if (imageWidth > 0) return imageWidth / BASE_VIEW_WIDTH / zoom
+  return 1 / zoom
+}

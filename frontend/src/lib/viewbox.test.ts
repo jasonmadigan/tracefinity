@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { clampZoom, zoomedViewBox, viewBoxPoint, zoomAtCursor, MIN_ZOOM, MAX_ZOOM } from './viewbox'
+import { clampZoom, zoomedViewBox, viewBoxPoint, zoomAtCursor, uiScaleFor, MIN_ZOOM, MAX_ZOOM, BASE_VIEW_WIDTH } from './viewbox'
 import { ZOOM_FACTOR } from './constants'
 
 const W = 2048
@@ -86,5 +86,52 @@ describe('zoomAtCursor', () => {
     const newPan = zoomAtCursor(W, H, 2, 4, { x: 15, y: -5 }, 0.5, 0.5)
     expect(newPan.x).toBeCloseTo(15, 8)
     expect(newPan.y).toBeCloseTo(-5, 8)
+  })
+})
+
+describe('uiScaleFor', () => {
+  // the bug: a portrait A4 photo is height-constrained, so the canvas renders
+  // far narrower than BASE_VIEW_WIDTH and a 1px stroke came out at ~0.53px
+  const IMG_W = 1505
+  const RENDERED_W = 426
+
+  function onScreenPx(units: number, imageWidth: number, renderedWidth: number): number {
+    return units * (renderedWidth / imageWidth)
+  }
+
+  it('renders one unit as one CSS pixel at zoom 1', () => {
+    const scale = uiScaleFor(IMG_W, RENDERED_W, 1)
+    expect(onScreenPx(scale * 1, IMG_W, RENDERED_W)).toBeCloseTo(1, 8)
+  })
+
+  it('holds on-screen size across zoom levels', () => {
+    for (const zoom of [0.5, 1, 2.5, 8, 20]) {
+      const scale = uiScaleFor(IMG_W, RENDERED_W, zoom)
+      const visibleWidth = IMG_W / zoom
+      expect(onScreenPx(scale * 1, visibleWidth, RENDERED_W)).toBeCloseTo(1, 8)
+    }
+  })
+
+  it('holds on-screen size regardless of image aspect', () => {
+    const portrait = uiScaleFor(1505, 426, 1)
+    const landscape = uiScaleFor(2048, 1200, 1)
+    expect(onScreenPx(portrait, 1505, 426)).toBeCloseTo(1, 8)
+    expect(onScreenPx(landscape, 2048, 1200)).toBeCloseTo(1, 8)
+  })
+
+  it('beats the old fixed-width assumption for a narrow canvas', () => {
+    const old = IMG_W / BASE_VIEW_WIDTH
+    expect(onScreenPx(old, IMG_W, RENDERED_W)).toBeLessThan(0.6)
+    expect(onScreenPx(uiScaleFor(IMG_W, RENDERED_W, 1), IMG_W, RENDERED_W)).toBeCloseTo(1, 8)
+  })
+
+  it('falls back to the fixed width before the render is measured', () => {
+    expect(uiScaleFor(IMG_W, 0, 1)).toBeCloseTo(IMG_W / BASE_VIEW_WIDTH, 8)
+  })
+
+  it('never returns zero or a negative scale', () => {
+    expect(uiScaleFor(0, 0, 1)).toBe(1)
+    expect(uiScaleFor(IMG_W, RENDERED_W, 0)).toBe(1)
+    expect(uiScaleFor(IMG_W, RENDERED_W, -1)).toBe(1)
   })
 })

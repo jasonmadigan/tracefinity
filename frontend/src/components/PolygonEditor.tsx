@@ -6,7 +6,7 @@ import { Undo2, Redo2, Trash2, Plus, Minus, Move } from 'lucide-react'
 import { polygonPathData } from '@/lib/svg'
 import { useHistory } from '@/hooks/useHistory'
 import { ZOOM_FACTOR } from '@/lib/constants'
-import { clampZoom, zoomedViewBox, viewBoxPoint, zoomAtCursor } from '@/lib/viewbox'
+import { clampZoom, zoomedViewBox, viewBoxPoint, zoomAtCursor, uiScaleFor } from '@/lib/viewbox'
 
 interface Props {
   imageUrl: string
@@ -18,8 +18,8 @@ interface Props {
   hovered?: string | null
   onHoveredChange?: (id: string | null) => void
 }
-// base sizes for SVG UI elements, designed for ~800px viewBox width
-const BASE_VIEW_WIDTH = 800
+// dark halo painted under outlines so they stay legible over photographs
+const HALO_STROKE = 'rgba(2, 6, 23, 0.55)'
 
 type EditMode = 'select' | 'vertex' | 'add-vertex' | 'delete-vertex'
 type DragState =
@@ -49,9 +49,9 @@ export function PolygonEditor({
   const panRef = useRef(pan)
   useEffect(() => { zoomRef.current = zoom }, [zoom])
   useEffect(() => { panRef.current = pan }, [pan])
-  // scale UI elements relative to image size so they're visible on large photos;
-  // divided by zoom so handles and strokes keep a constant on-screen size
-  const uiScale = (imageSize.width > 0 ? imageSize.width / BASE_VIEW_WIDTH : 1) / zoom
+  // fitted is the measured size of the box the viewBox paints into, so one
+  // uiScale unit lands as one CSS pixel regardless of image aspect
+  const uiScale = uiScaleFor(imageSize.width, fitted.width, zoom)
 
   // active polygon for vertex editing (internal)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -507,8 +507,8 @@ export function PolygonEditor({
             const isHovered = hovered === poly.id
             const pathData = polygonPathData(poly.points, poly.interior_rings)
 
-            let fill = 'rgba(90, 180, 222, 0.06)'
-            let stroke = 'rgba(90, 180, 222, 0.4)'
+            let fill = 'rgba(90, 180, 222, 0.08)'
+            let stroke = 'rgba(90, 180, 222, 0.85)'
             let strokeW = uiScale * 1
             if (isActive) {
               fill = 'rgba(90, 180, 222, 0.3)'
@@ -526,6 +526,14 @@ export function PolygonEditor({
 
             return (
               <g key={poly.id}>
+                <path
+                  d={pathData}
+                  fillRule="evenodd"
+                  fill="none"
+                  stroke={HALO_STROKE}
+                  strokeWidth={strokeW + uiScale * 1.5}
+                  className="pointer-events-none"
+                />
                 <path
                   d={pathData}
                   fillRule="evenodd"
