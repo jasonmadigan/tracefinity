@@ -2,6 +2,8 @@ import logging
 from posixpath import normpath
 
 from fastapi import FastAPI
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -36,6 +38,21 @@ async def _store_closed_handler(request: Request, exc: StoreClosedError):
     # an in-flight request lost the race against user deletion; the data
     # it targets is gone for good
     return JSONResponse(status_code=410, content={"detail": "user data deleted"})
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_handler(request: Request, exc: RequestValidationError):
+    # a 422 is otherwise invisible in the access log, which makes a client
+    # sending a bad payload impossible to diagnose after the fact. log where
+    # it failed and why, never the value itself: payloads carry user data
+    where = ", ".join(
+        f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('type', 'unknown')}"
+        for e in exc.errors()
+    )
+    logging.getLogger("app.validation").warning(
+        "422 %s %s -> %s", request.method, request.url.path, where or "no detail"
+    )
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.on_event("startup")

@@ -9,7 +9,7 @@ import { ToolBrowser } from '@/components/ToolBrowser'
 import { getBin, updateBin, generateBinStl, getBinStlUrl, getBinZipUrl, getBinThreemfUrl, getBinInsertUrl, getImageUrl, listTools, updateTool } from '@/lib/api'
 import { buildBinConfig, createPartialBinsValues, getDefaultBinConfig, resetDefaultBinConfig, saveDefaultBinConfig } from '@/lib/binDefaults'
 import type { BinConfig, BinData, PlacedTool, TextLabel } from '@/types'
-import { Download, Loader2, Package, ChevronDown, Check } from 'lucide-react'
+import { Download, Loader2, Package, ChevronDown, Check, TriangleAlert } from 'lucide-react'
 import { Breadcrumb } from '@/components/Breadcrumb'
 import { Alert } from '@/components/Alert'
 import { useDebouncedSave } from '@/hooks/useDebouncedSave'
@@ -166,15 +166,15 @@ export default function BinPage() {
     doGenerateRef.current = doGenerate
   }, [doGenerate])
 
-  const { saving, saved } = useDebouncedSave(
-    () => {
+  const { saving, saved, error: saveError } = useDebouncedSave(
+    async () => {
       if (!binData) return
-      updateBin(binId, {
+      await updateBin(binId, {
         name: name || undefined,
         bin_config: config,
         placed_tools: placedTools,
         text_labels: textLabels,
-      }).catch(() => {})
+      })
     },
     [binData, binId, name, config, placedTools, textLabels],
     150,
@@ -389,8 +389,19 @@ export default function BinPage() {
                 { label: name || 'Untitled', editable: true, onEdit: (v) => setName(v) },
               ]} />
               {saving && <Loader2 className="w-3 h-3 animate-spin text-text-muted flex-shrink-0" />}
-              {saved && <Check className="w-3 h-3 text-green-400 flex-shrink-0" />}
+              {saved && !saveError && <Check className="w-3 h-3 text-green-400 flex-shrink-0" />}
+              {saveError && !saving && (
+                <TriangleAlert
+                  className="w-3 h-3 text-red-400 flex-shrink-0"
+                  aria-label="Changes not saved"
+                />
+              )}
             </div>
+            {saveError && (
+              <div role="alert" className="mb-3 rounded-[8px] border border-red-800 bg-red-900/20 px-2 py-1.5 text-[11px] text-red-300">
+                Changes are not being saved. Recent edits to this bin will be lost if you leave the page.
+              </div>
+            )}
             <BinConfigurator config={config} onChange={setConfig} autoSize={autoSize} onAutoSizeChange={setAutoSize} />
             <div className="mt-3 border-t border-border pt-3 space-y-1.5">
               <div className="flex gap-1.5">
