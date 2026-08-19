@@ -6,7 +6,7 @@ import { Undo2, Redo2, Trash2, Plus, Minus, Move } from 'lucide-react'
 import { polygonPathData } from '@/lib/svg'
 import { useHistory } from '@/hooks/useHistory'
 import { ZOOM_FACTOR } from '@/lib/constants'
-import { clampZoom, zoomedViewBox, viewBoxPoint, zoomAtCursor } from '@/lib/viewbox'
+import { clampZoom, zoomedViewBox, viewBoxPoint, zoomAtCursor, uiScaleFor } from '@/lib/viewbox'
 
 interface Props {
   imageUrl: string
@@ -18,8 +18,6 @@ interface Props {
   hovered?: string | null
   onHoveredChange?: (id: string | null) => void
 }
-// fallback only, used until the rendered size has been measured
-const BASE_VIEW_WIDTH = 800
 // dark halo painted under outlines so they stay legible over photographs
 const HALO_STROKE = 'rgba(2, 6, 23, 0.55)'
 
@@ -51,15 +49,9 @@ export function PolygonEditor({
   const panRef = useRef(pan)
   useEffect(() => { zoomRef.current = zoom }, [zoom])
   useEffect(() => { panRef.current = pan }, [pan])
-  // one uiScale unit == one CSS pixel on screen. derived from the rendered size,
-  // not a fixed width: a portrait image is height-constrained, so the canvas is
-  // far narrower than BASE_VIEW_WIDTH and assuming otherwise gives sub-pixel
-  // strokes. divided by zoom so handles and strokes keep a constant size.
-  const uiScale = (
-    fitted.width > 0
-      ? imageSize.width / fitted.width
-      : imageSize.width > 0 ? imageSize.width / BASE_VIEW_WIDTH : 1
-  ) / zoom
+  // fitted is the measured size of the box the viewBox paints into, so one
+  // uiScale unit lands as one CSS pixel regardless of image aspect
+  const uiScale = uiScaleFor(imageSize.width, fitted.width, zoom)
 
   // active polygon for vertex editing (internal)
   const [activeId, setActiveId] = useState<string | null>(null)
