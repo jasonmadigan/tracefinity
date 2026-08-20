@@ -294,7 +294,7 @@ export default function ProjectPage() {
   }
 
   async function handleCreateBin() {
-    if (!project || selectedBinToolIds.size === 0) return
+    if (!project) return
     setCreatingBin(true)
     setError(null)
     try {
@@ -423,11 +423,11 @@ export default function ProjectPage() {
           </select>
           <button
             onClick={handleCreateBin}
-            disabled={creatingBin || selectedBinToolIds.size === 0}
+            disabled={creatingBin}
             className="btn-primary px-3 py-2 text-xs flex items-center gap-1.5"
           >
             {creatingBin ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Package className="w-3.5 h-3.5" />}
-            Create bin{selectedBinToolIds.size > 0 ? ` (${selectedBinToolIds.size})` : ''}
+            {selectedBinToolIds.size > 0 ? `Create bin (${selectedBinToolIds.size})` : 'Create blank bin'}
           </button>
         </div>
       </div>

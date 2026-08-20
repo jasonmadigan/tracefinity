@@ -117,8 +117,6 @@ export default function BinPage() {
   }, [binId])
 
   const doGenerate = useCallback(async () => {
-    if (placedTools.length === 0) return
-
     const key = JSON.stringify({ placedTools, config, textLabels, smoothed: [...smoothedToolIds], levels: [...smoothLevels] })
     if (key === lastGenerateRef.current) return
 
@@ -547,8 +545,10 @@ export default function BinPage() {
               <div className="flex items-center gap-2 text-[11px] text-text-muted">
                 {generating && <Loader2 className="w-3 h-3 animate-spin text-accent" />}
                 <span>{config.grid_x}x{config.grid_y} Grid ({binW} x {binH} mm)</span>
-                {placedTools.length > 0 && (
+                {placedTools.length > 0 ? (
                   <span>· {placedTools.length} tool{placedTools.length !== 1 ? 's' : ''} placed</span>
+                ) : (
+                  <span>· blank bin</span>
                 )}
               </div>
             </div>
@@ -582,8 +582,6 @@ export default function BinPage() {
                       <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
                       <span>Generating...</span>
                     </>
-                  ) : placedTools.length === 0 ? (
-                    <span>Add tools to see preview</span>
                   ) : (
                     <span>Preview will appear here</span>
                   )}
