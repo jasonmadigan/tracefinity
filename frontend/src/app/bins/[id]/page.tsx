@@ -14,7 +14,7 @@ import { Breadcrumb } from '@/components/Breadcrumb'
 import { Alert } from '@/components/Alert'
 import { useDebouncedSave } from '@/hooks/useDebouncedSave'
 import { useProjectSource } from '@/hooks/useProjectSource'
-import { GRID_UNIT } from '@/lib/constants'
+import { GRID_UNIT, clampGridSize } from '@/lib/constants'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 
@@ -220,8 +220,8 @@ export default function BinPage() {
     const toolH = maxY - minY
     const snap = config.half_grid_base ? 0.5 : 1.0;
     const snapUnit = GRID_UNIT * snap;
-    const needX = Math.max(1, Math.ceil((toolW + 2 * halfMargin) / snapUnit) * snap);
-    const needY = Math.max(1, Math.ceil((toolH + 2 * halfMargin) / snapUnit) * snap);
+    const needX = clampGridSize(Math.ceil((toolW + 2 * halfMargin) / snapUnit) * snap);
+    const needY = clampGridSize(Math.ceil((toolH + 2 * halfMargin) / snapUnit) * snap);
 
     const gridChanged = config.grid_x !== needX || config.grid_y !== needY
     if (gridChanged) {
@@ -286,8 +286,8 @@ export default function BinPage() {
     const margin = 2 * config.wall_thickness + 2 * config.cutout_clearance + 0.5;
     const snap = config.half_grid_base ? 0.5 : 1.0;
     const snapUnit = GRID_UNIT * snap;
-    const needX = Math.max(config.grid_x, Math.ceil((toolW + margin) / snapUnit) * snap);
-    const needY = Math.max(config.grid_y, Math.ceil((toolH + margin) / snapUnit) * snap);
+    const needX = clampGridSize(Math.max(config.grid_x, Math.ceil((toolW + margin) / snapUnit) * snap));
+    const needY = clampGridSize(Math.max(config.grid_y, Math.ceil((toolH + margin) / snapUnit) * snap));
 
     if (needX !== config.grid_x || needY !== config.grid_y) {
         setConfig((prev) => ({
