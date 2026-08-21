@@ -21,7 +21,7 @@ Tracefinity is the photo-tracing-to-gridfinity pipeline. Photos are the input; g
 
 - **Keep PRs focused.** One concern per PR. If you're touching unrelated files (sidebar width, dev scripts, polish), split them out.
 - **Backward compatible schemas.** New fields must have defaults. Existing data must load without migration.
-- **Tests must actually run.** Run `pytest` and check for failures before submitting, not just `py_compile`.
+- **Tests must actually run.** Run the backend `pytest` suite and frontend `pnpm test` suite before submitting; compilation alone is not enough.
 
 ## Frontend
 
