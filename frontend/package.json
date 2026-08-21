@@ -7,6 +7,7 @@
     "dev": "next dev -p 4001",
     "build": "next build",
     "start": "next start",
+    "test": "vitest run",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix"
   },
@@ -40,6 +41,7 @@
       "postcss": ">=8.5.23",
       "js-yaml": ">=4.3.1",
       "undici": ">=7.29.0",
+      "jsdom@29>undici": "7.29.0",
       "brace-expansion@1": "1.1.18",
       "brace-expansion@2": "2.1.4"
     }

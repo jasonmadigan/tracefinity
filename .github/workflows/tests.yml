@@ -18,3 +18,17 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: cd backend && pip install -r requirements.txt pytest
       - run: cd backend && python -m pytest
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - run: cd frontend && pnpm install --frozen-lockfile
+      - run: cd frontend && pnpm test
