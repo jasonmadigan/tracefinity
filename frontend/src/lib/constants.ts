@@ -8,14 +8,46 @@ export const ZOOM_FACTOR = 1.15
 export const DEFAULT_CUTOUT_DEPTH = 20
 export const DOCS_BASE_URL = 'https://github.com/tracefinity/tracefinity/blob/main/docs'
 
-// grid bounds enforced by the backend validator on bin_config.grid_x/grid_y.
-// exceeding them rejects the whole bin update, so clamp before building a payload
+// Bin geometry is generated in full before bed-size splitting. Keep the
+// resource ceiling tied to total grid cells while allowing long, narrow bins.
 export const MIN_GRID_UNITS = 1
-export const MAX_GRID_UNITS = 10
+export const MAX_GRID_UNITS = 25
+export const MAX_GRID_CELLS = 100
 
-// snap to the nearest 0.5 and hold inside the valid range
-export function clampGridSize(v: number): number {
-  if (Number.isNaN(v)) return MIN_GRID_UNITS
-  const snapped = Math.round(v * 2) / 2
-  return Math.min(MAX_GRID_UNITS, Math.max(MIN_GRID_UNITS, snapped))
+export function gridCellCount(gridX: number, gridY: number): number {
+  return Math.ceil(gridX) * Math.ceil(gridY)
+}
+
+export function requiredGridUnits(
+  spanMm: number,
+  totalMarginMm: number,
+  halfGridBase: boolean,
+): number {
+  const snap = halfGridBase ? 0.5 : 1
+  const snapUnitMm = GRID_UNIT * snap
+  return Math.max(MIN_GRID_UNITS, Math.ceil((spanMm + totalMarginMm) / snapUnitMm) * snap)
+}
+
+export function getGridSizeError(gridX: number, gridY: number): string | null {
+  if (!Number.isFinite(gridX) || !Number.isFinite(gridY)) {
+    return 'Grid dimensions must be finite numbers'
+  }
+  if (gridX < MIN_GRID_UNITS || gridY < MIN_GRID_UNITS) {
+    return `Grid dimensions must be at least ${MIN_GRID_UNITS} unit`
+  }
+  if (gridX > MAX_GRID_UNITS || gridY > MAX_GRID_UNITS) {
+    return `Grid dimensions must not exceed ${MAX_GRID_UNITS} units per axis`
+  }
+  if (gridX * 2 !== Math.trunc(gridX * 2) || gridY * 2 !== Math.trunc(gridY * 2)) {
+    return 'Grid dimensions must use 0.5-unit increments'
+  }
+  if (gridCellCount(gridX, gridY) > MAX_GRID_CELLS) {
+    return `Grid footprint must not exceed ${MAX_GRID_CELLS} cells`
+  }
+  return null
+}
+
+export function maxGridUnitsForOtherAxis(otherAxis: number): number {
+  const otherCells = Math.max(1, Math.ceil(otherAxis))
+  return Math.min(MAX_GRID_UNITS, Math.floor(MAX_GRID_CELLS / otherCells))
 }

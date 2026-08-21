@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from app.constants import PaperSize
+from app.constants import (
+    MAX_BIN_GRID_CELLS,
+    MAX_BIN_GRID_UNITS,
+    MIN_BIN_GRID_UNITS,
+    PaperSize,
+)
 
 
 class Point(BaseModel):
@@ -105,9 +111,11 @@ class BinParams(BaseModel):
 
     @model_validator(mode="after")
     def normalize_partial_bins_values(self) -> "BinParams":
-        import math
-
         expected = math.ceil(self.grid_x) * math.ceil(self.grid_y)
+        if expected > MAX_BIN_GRID_CELLS:
+            raise ValueError(
+                f"grid footprint must not exceed {MAX_BIN_GRID_CELLS} cells"
+            )
         if len(self.partial_bins_values) != expected:
             self.partial_bins_values = [True] * expected
         if not self.partial_bins_connect:
@@ -119,9 +127,10 @@ class BinParams(BaseModel):
     @field_validator("grid_x", "grid_y")
     @classmethod
     def validate_grid(cls, v: float) -> float:
-        if v < 1 or v > 10:
-            raise ValueError("grid size must be between 1 and 10")
-        # must be a multiple of 0.5
+        if v < MIN_BIN_GRID_UNITS:
+            raise ValueError(f"grid size must be at least {MIN_BIN_GRID_UNITS:g} unit")
+        if v > MAX_BIN_GRID_UNITS:
+            raise ValueError(f"grid size must not exceed {MAX_BIN_GRID_UNITS:g} units per axis")
         if v * 2 != int(v * 2):
             raise ValueError("grid size must be a multiple of 0.5")
         return v

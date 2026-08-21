@@ -70,7 +70,7 @@ The sidebar controls all bin parameters:
 
 | Setting | Description |
 |-|-|
-| Grid Width / Depth | Bin size in gridfinity units (42mm each). 1-10. |
+| Grid Width / Depth | Bin size in gridfinity units (42mm each). 1-25 per axis, up to a 100-cell footprint. |
 | Height | Bin height in units (7mm each + 4.75mm base). |
 | Cutout Depth | How deep tool pockets are cut. |
 | Clearance | Extra space around tool outlines. |

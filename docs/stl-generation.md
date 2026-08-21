@@ -103,9 +103,19 @@ For NxM bins multiply grid centres by `(ix - (N-1)/2) * 42`.
 grid_units = ceil((tool_dimension + 2*wall + 2*clearance + 0.5) / 42)
 ```
 
+Each axis is limited to 25 grid units and the footprint to
+`ceil(grid_x) * ceil(grid_y) <= 100`. The footprint limit bounds geometry
+generation cost while still allowing long, narrow bins. Auto-size reports the
+required dimensions rather than silently shrinking layouts that exceed either
+limit.
+
 ## Bin Splitting
 
 Large bins are split along grid boundaries using manifold3d `split_by_plane`. Diagonal fit check: `(W + H) / sqrt(2) <= bed_size`. Split parts exported as ZIP.
+
+The full bin manifold is generated before splitting, so bed size controls the
+exported piece size rather than the maximum logical bin size or generation
+resource use.
 
 With partial bins in cut mode, separated islands are exported via `decompose` instead of plane cuts when connect mode is off. With connect mode on, bed splitting measures against the full grid size. See **Partial bins** above.
 

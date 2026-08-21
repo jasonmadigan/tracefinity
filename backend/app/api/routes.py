@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 from app.auth import get_user_id
 from app.config import ensure_user_dirs, settings
-from app.constants import GF_GRID
+from app.constants import GF_GRID, MAX_BIN_GRID_CELLS, MAX_BIN_GRID_UNITS
 from app.models.schemas import (
     BinConfig,
     BinDefaults,
@@ -409,8 +409,18 @@ def _build_bin_from_tools(
         else:
             grid_x = max(1.0, math.ceil(needed_w / GF_GRID))
             grid_y = max(1.0, math.ceil(needed_h / GF_GRID))
-        bc.grid_x = min(grid_x, 10.0)
-        bc.grid_y = min(grid_y, 10.0)
+        grid_cells = math.ceil(grid_x) * math.ceil(grid_y)
+        if grid_x > MAX_BIN_GRID_UNITS or grid_y > MAX_BIN_GRID_UNITS or grid_cells > MAX_BIN_GRID_CELLS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"selected tools require a {grid_x:g}x{grid_y:g} grid ({grid_cells} cells); "
+                    f"bins support up to {MAX_BIN_GRID_UNITS:g} units per axis and "
+                    f"{MAX_BIN_GRID_CELLS} cells total"
+                ),
+            )
+        bc.grid_x = grid_x
+        bc.grid_y = grid_y
         bc.partial_bins_values = [True] * (math.ceil(bc.grid_x) * math.ceil(bc.grid_y))
 
         bin_w = bc.grid_x * GF_GRID
@@ -1884,4 +1894,3 @@ def storage_stats(request: Request):
             raise HTTPException(status_code=403)
 
     return _storage_stats_snapshot(settings.storage_path)
-

@@ -32,7 +32,7 @@ def _min_grid_for_size(
     else:
         gx = max(1.0, math.ceil(needed_w / GF_GRID))
         gy = max(1.0, math.ceil(needed_h / GF_GRID))
-    return min(gx, 10.0), min(gy, 10.0)
+    return gx, gy
 
 
 def _min_grid_bbox(

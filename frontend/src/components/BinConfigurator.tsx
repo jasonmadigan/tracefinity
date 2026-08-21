@@ -4,6 +4,7 @@ import { Info } from 'lucide-react'
 import type { BinConfig } from '@/types'
 import { NumericInput } from '@/components/NumericInput'
 import { createPartialBinsValues } from '@/lib/binDefaults'
+import { maxGridUnitsForOtherAxis } from '@/lib/constants'
 import { BED_SIZE_MAX_MM, BED_SIZE_MIN_MM } from '@/lib/settings'
 import { cn } from '@/lib/utils'
 import { ClassValue } from 'clsx'
@@ -189,7 +190,7 @@ export function BinConfigurator({ config, onChange, autoSize, onAutoSizeChange }
         help="Bin width in gridfinity units (42mm each). Half-unit increments (21mm) supported."
         value={config.grid_x}
         min={1}
-        max={10}
+        max={maxGridUnitsForOtherAxis(config.grid_y)}
         step={0.5}
         unit="u"
         onChange={(v) =>
@@ -206,7 +207,7 @@ export function BinConfigurator({ config, onChange, autoSize, onAutoSizeChange }
         help="Bin depth in gridfinity units (42mm each). Half-unit increments (21mm) supported."
         value={config.grid_y}
         min={1}
-        max={10}
+        max={maxGridUnitsForOtherAxis(config.grid_x)}
         step={0.5}
         unit="u"
         onChange={(v) =>

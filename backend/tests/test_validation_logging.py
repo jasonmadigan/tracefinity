@@ -27,6 +27,19 @@ def test_validation_failure_logs_field_and_type(client, caplog):
     assert "float_type" in logged
 
 
+def test_validation_failure_logs_the_specific_rule(client, caplog):
+    with caplog.at_level(logging.WARNING, logger="app.validation"):
+        resp = client.put(
+            "/api/bins/does-not-exist",
+            json={"bin_config": {"grid_x": 25.5}},
+        )
+
+    assert resp.status_code == 422
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "grid_x" in logged
+    assert "grid size must not exceed 25 units per axis" in logged
+
+
 def test_validation_log_does_not_record_the_value(client, caplog):
     # payloads carry user data, so the offending value must never be logged
     with caplog.at_level(logging.WARNING, logger="app.validation"):
