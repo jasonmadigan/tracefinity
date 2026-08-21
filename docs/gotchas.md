@@ -13,7 +13,7 @@ SVG/layout/bin-space is Y-down (0 = top edge). build123d is Y-up. Always negate 
 
 ## Cutout pipeline order
 
-Smoothing/simplification runs BEFORE clearance (`prepare_for_generation`), never after -- vertex reduction erodes the outline by up to its tolerance and must not eat the clearance. The printed pocket is the previewed shape grown by exactly the clearance. The smoothing epsilon is absolute mm (`smooth_epsilon`), duplicated in `lib/svg.ts smoothEpsilon` -- change both together or preview and print diverge.
+Smoothing/simplification runs BEFORE clearance (`prepare_for_generation`), never after -- vertex reduction erodes the outline by up to its tolerance and must not eat the clearance. The printed pocket is the previewed shape grown by exactly the clearance. The smoothing epsilon is absolute mm (`smooth_epsilon`), duplicated in `lib/svg.ts smoothEpsilon`. After simplification, both pipelines add support points 2mm from each corner before Chaikin subdivision so corner influence cannot bow long edges. Keep the epsilon and Chaikin corner span in lockstep between backend and frontend or preview and print diverge.
 
 ## EXIF orientation
 
