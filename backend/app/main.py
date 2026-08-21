@@ -46,7 +46,8 @@ async def _validation_handler(request: Request, exc: RequestValidationError):
     # sending a bad payload impossible to diagnose after the fact. log where
     # it failed and why, never the value itself: payloads carry user data
     where = ", ".join(
-        f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('type', 'unknown')}"
+        f"{'.'.join(str(p) for p in e.get('loc', ()))}: "
+        f"{e.get('type', 'unknown')} ({e.get('msg', 'no message')})"
         for e in exc.errors()
     )
     logging.getLogger("app.validation").warning(

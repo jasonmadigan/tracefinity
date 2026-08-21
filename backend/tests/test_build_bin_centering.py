@@ -10,6 +10,7 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from app.constants import GF_GRID
 from app.models.schemas import FingerHole, Point, Tool
@@ -80,6 +81,30 @@ class TestBuildBinCentering:
 
         assert placed_cx == pytest.approx(bin_cx, abs=0.1)
         assert placed_cy == pytest.approx(bin_cy, abs=0.1)
+
+    def test_long_narrow_tool_uses_more_than_ten_grid_units(self):
+        from app.api.routes import _build_bin_from_tools
+
+        tool = _make_tool([(0, 0), (600, 0), (600, 20), (0, 20)])
+        store = _mock_tool_store({tool.id: tool})
+
+        result = _build_bin_from_tools("bin1", "test", None, [tool.id], store)
+
+        assert result.bin_config.grid_x == 15
+        assert result.bin_config.grid_y == 1
+
+    def test_tool_layout_over_resource_limit_is_rejected_instead_of_clipped(self):
+        from app.api.routes import _build_bin_from_tools
+
+        tool = _make_tool([(0, 0), (1050, 0), (1050, 20), (0, 20)])
+        store = _mock_tool_store({tool.id: tool})
+
+        with pytest.raises(HTTPException) as exc_info:
+            _build_bin_from_tools("bin1", "test", None, [tool.id], store)
+
+        assert exc_info.value.status_code == 422
+        assert "require a 26x1 grid" in exc_info.value.detail
+        assert "25 units per axis" in exc_info.value.detail
 
     def test_rotated_tool_is_centred_in_bin(self):
         """tool rotated around centroid (bbox no longer at origin) -> still centred."""

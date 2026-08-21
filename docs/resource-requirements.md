@@ -71,6 +71,10 @@ and then receive a 503 busy response; for example,
 `-e STL_GENERATION_CONCURRENCY=1` serializes generation and minimizes peak
 memory use. The limit is process-wide.
 
+Bin geometry is limited to a 100-cell grid footprint and 25 units per axis. The
+full manifold is generated before bed-size splitting, so printer bed size does
+not reduce peak generation memory.
+
 ### Kubernetes / Helm
 
 Set `resources.requests.memory` to match the tracer. Example for IS-Net:

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { BinEditor } from '@/components/BinEditor'
 import { BinConfigurator, calcMaxCutoutDepth } from '@/components/BinConfigurator'
@@ -14,7 +14,14 @@ import { Breadcrumb } from '@/components/Breadcrumb'
 import { Alert } from '@/components/Alert'
 import { useDebouncedSave } from '@/hooks/useDebouncedSave'
 import { useProjectSource } from '@/hooks/useProjectSource'
-import { GRID_UNIT, clampGridSize } from '@/lib/constants'
+import {
+  getGridSizeError,
+  gridCellCount,
+  GRID_UNIT,
+  MAX_GRID_CELLS,
+  MAX_GRID_UNITS,
+  requiredGridUnits,
+} from '@/lib/constants'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 
@@ -64,6 +71,38 @@ export default function BinPage() {
   const [defaultsStatus, setDefaultsStatus] = useState<string | null>(null)
   const defaultsStatusTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const exportRef = useRef<HTMLDivElement>(null)
+
+  const requiredGridSize = useMemo(() => {
+    if (!autoSize || placedTools.length === 0) return null
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const tool of placedTools) {
+      for (const point of tool.points) {
+        minX = Math.min(minX, point.x)
+        minY = Math.min(minY, point.y)
+        maxX = Math.max(maxX, point.x)
+        maxY = Math.max(maxY, point.y)
+      }
+    }
+
+    const halfMargin = config.wall_thickness + config.cutout_clearance + 0.25
+    const totalMargin = 2 * halfMargin
+    return {
+      x: requiredGridUnits(maxX - minX, totalMargin, config.half_grid_base),
+      y: requiredGridUnits(maxY - minY, totalMargin, config.half_grid_base),
+      minX,
+      minY,
+      maxX,
+      maxY,
+    }
+  }, [autoSize, placedTools, config.wall_thickness, config.cutout_clearance, config.half_grid_base])
+
+  const requiredGridError = requiredGridSize
+    ? getGridSizeError(requiredGridSize.x, requiredGridSize.y)
+    : null
+  const gridLimitError = requiredGridSize && requiredGridError
+    ? `Layout requires ${requiredGridSize.x}×${requiredGridSize.y} grid units (${gridCellCount(requiredGridSize.x, requiredGridSize.y)} cells). The maximum is ${MAX_GRID_UNITS} units per axis and ${MAX_GRID_CELLS} cells total. Reduce or rearrange the tools; preview and export are paused, but edits continue to save.`
+    : null
 
   useEffect(() => {
     if (!exportOpen) return
@@ -117,7 +156,7 @@ export default function BinPage() {
   }, [binId])
 
   const doGenerate = useCallback(async () => {
-    if (placedTools.length === 0) return
+    if (placedTools.length === 0 || gridLimitError) return
 
     const key = JSON.stringify({ placedTools, config, textLabels, smoothed: [...smoothedToolIds], levels: [...smoothLevels] })
     if (key === lastGenerateRef.current) return
@@ -160,11 +199,27 @@ export default function BinPage() {
         abortRef.current = null
       }
     }
-  }, [binId, placedTools, config, textLabels, smoothedToolIds, smoothLevels])
+  }, [binId, placedTools, config, textLabels, smoothedToolIds, smoothLevels, gridLimitError])
 
   useEffect(() => {
     doGenerateRef.current = doGenerate
   }, [doGenerate])
+
+  useEffect(() => {
+    if (!gridLimitError) return
+    abortRef.current?.abort()
+    abortRef.current = null
+    generatingRef.current = false
+    lastGenerateRef.current = ''
+    setGenerating(false)
+    setError(null)
+    setWarning(null)
+    setStlUrl(null)
+    setStlUrls([])
+    setThreemfUrl(null)
+    setZipUrl(null)
+    setInsertStlUrl(null)
+  }, [gridLimitError])
 
   const { saving, saved, error: saveError } = useDebouncedSave(
     async () => {
@@ -205,23 +260,8 @@ export default function BinPage() {
 
   // auto-size: fit grid to bounding box of all placed tools, recentre if grid changes
   useEffect(() => {
-    if (!autoSize || isDragging || placedTools.length === 0) return
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-    for (const tool of placedTools) {
-      for (const p of tool.points) {
-        minX = Math.min(minX, p.x)
-        minY = Math.min(minY, p.y)
-        maxX = Math.max(maxX, p.x)
-        maxY = Math.max(maxY, p.y)
-      }
-    }
-    const halfMargin = config.wall_thickness + config.cutout_clearance + 0.25
-    const toolW = maxX - minX
-    const toolH = maxY - minY
-    const snap = config.half_grid_base ? 0.5 : 1.0;
-    const snapUnit = GRID_UNIT * snap;
-    const needX = clampGridSize(Math.ceil((toolW + 2 * halfMargin) / snapUnit) * snap);
-    const needY = clampGridSize(Math.ceil((toolH + 2 * halfMargin) / snapUnit) * snap);
+    if (isDragging || !requiredGridSize || requiredGridError) return
+    const { x: needX, y: needY, minX, minY, maxX, maxY } = requiredGridSize
 
     const gridChanged = config.grid_x !== needX || config.grid_y !== needY
     if (gridChanged) {
@@ -250,7 +290,7 @@ export default function BinPage() {
         ),
       })))
     }
-  }, [autoSize, isDragging, placedTools, config.grid_x, config.grid_y, config.wall_thickness, config.cutout_clearance, config.half_grid_base])
+  }, [isDragging, requiredGridSize, requiredGridError, placedTools, config.grid_x, config.grid_y])
 
   const handleToggleSmoothed = useCallback(async (toolId: string, smoothed: boolean) => {
     try {
@@ -284,12 +324,11 @@ export default function BinPage() {
     const toolH = maxY - minY
 
     const margin = 2 * config.wall_thickness + 2 * config.cutout_clearance + 0.5;
-    const snap = config.half_grid_base ? 0.5 : 1.0;
-    const snapUnit = GRID_UNIT * snap;
-    const needX = clampGridSize(Math.max(config.grid_x, Math.ceil((toolW + margin) / snapUnit) * snap));
-    const needY = clampGridSize(Math.max(config.grid_y, Math.ceil((toolH + margin) / snapUnit) * snap));
+    const needX = Math.max(config.grid_x, requiredGridUnits(toolW, margin, config.half_grid_base));
+    const needY = Math.max(config.grid_y, requiredGridUnits(toolH, margin, config.half_grid_base));
+    const candidateIsValid = getGridSizeError(needX, needY) === null
 
-    if (needX !== config.grid_x || needY !== config.grid_y) {
+    if (candidateIsValid && (needX !== config.grid_x || needY !== config.grid_y)) {
         setConfig((prev) => ({
             ...prev,
             grid_x: needX,
@@ -299,8 +338,8 @@ export default function BinPage() {
     }
 
     // always centre the tool in the bin
-    const binW = needX * GRID_UNIT
-    const binH = needY * GRID_UNIT
+    const binW = (candidateIsValid ? needX : config.grid_x) * GRID_UNIT
+    const binH = (candidateIsValid ? needY : config.grid_y) * GRID_UNIT
     const toolCx = (minX + maxX) / 2
     const toolCy = (minY + maxY) / 2
     const dx = binW / 2 - toolCx
@@ -369,13 +408,13 @@ export default function BinPage() {
     )
   }
 
-  const stlUrlWithVersion = stlUrl ? `${stlUrl}?v=${stlVersion}` : null
-  const splitUrlsWithVersion = stlUrls.length > 0 ? stlUrls.map(u => `${u}?v=${stlVersion}`) : null
-  const insertUrlWithVersion = insertStlUrl ? `${insertStlUrl}?v=${stlVersion}` : null
+  const stlUrlWithVersion = stlUrl && !gridLimitError ? `${stlUrl}?v=${stlVersion}` : null
+  const splitUrlsWithVersion = stlUrls.length > 0 && !gridLimitError ? stlUrls.map(u => `${u}?v=${stlVersion}`) : null
+  const insertUrlWithVersion = insertStlUrl && !gridLimitError ? `${insertStlUrl}?v=${stlVersion}` : null
   const binW = config.grid_x * GRID_UNIT
   const binH = config.grid_y * GRID_UNIT
   const effectiveRimUnits = config.stacking_lip ? config.rim_units : 0
-  const hasExports = stlUrl || zipUrl || threemfUrl || insertStlUrl
+  const hasExports = !gridLimitError && (stlUrl || zipUrl || threemfUrl || insertStlUrl)
 
   return (
     <div className="h-[calc(100vh-44px)] flex">
@@ -439,6 +478,7 @@ export default function BinPage() {
 
         {/* export buttons */}
         <div className="p-3 flex-shrink-0 space-y-1.5">
+          {gridLimitError && <Alert variant="warning">{gridLimitError}</Alert>}
           {error && <Alert variant="error">{error}</Alert>}
           {warning && (
             <InfoBanner>{warning}</InfoBanner>
@@ -582,6 +622,8 @@ export default function BinPage() {
                       <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
                       <span>Generating...</span>
                     </>
+                  ) : gridLimitError ? (
+                    <span className="max-w-xs px-4 text-center">Layout is too large to generate. Your edits are still saved.</span>
                   ) : placedTools.length === 0 ? (
                     <span>Add tools to see preview</span>
                   ) : (

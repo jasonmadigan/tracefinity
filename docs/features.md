@@ -48,7 +48,7 @@ Reference for AI agents. Check here before suggesting new features or claiming s
 
 ## Bin Configuration
 
-- Grid sizing (width/depth in gridfinity units, 1-10, 0.5-unit increments for 21mm half-grid)
+- Grid sizing (width/depth in gridfinity units, 1-25 per axis and 100 cells total, with 0.5-unit increments for 21mm half-grid)
 - Bin height in units (7mm each + 4.75mm base)
 - Cutout depth (5mm to max)
 - Clearance (0-5mm extra space around tools)

@@ -34,13 +34,26 @@ def test_grid_rejects_non_half_increment():
 
 
 def test_grid_rejects_below_minimum():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="at least 1 unit"):
         BinParams(grid_x=0.5)
 
 
 def test_grid_rejects_above_maximum():
-    with pytest.raises(ValidationError):
-        BinParams(grid_x=10.5)
+    with pytest.raises(ValidationError, match="not exceed 25 units per axis"):
+        BinParams(grid_x=25.5)
+
+
+@pytest.mark.parametrize(("grid_x", "grid_y"), [(20, 5), (25, 4), (10.5, 9)])
+def test_grid_accepts_long_narrow_footprints(grid_x: float, grid_y: float):
+    params = BinParams(grid_x=grid_x, grid_y=grid_y)
+    assert params.grid_x == grid_x
+    assert params.grid_y == grid_y
+
+
+@pytest.mark.parametrize(("grid_x", "grid_y"), [(20, 5.5), (10.5, 10), (25, 4.5)])
+def test_grid_rejects_footprints_over_100_cells(grid_x: float, grid_y: float):
+    with pytest.raises(ValidationError, match="footprint must not exceed 100 cells"):
+        BinParams(grid_x=grid_x, grid_y=grid_y)
 
 
 # ── cell layout ──────────────────────────────────────────────────────────────
