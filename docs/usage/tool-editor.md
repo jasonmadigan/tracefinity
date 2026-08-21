@@ -40,7 +40,7 @@ not change which outline bins and exports use.
 
 **Accurate** -- the raw traced polygon with all vertices. You can add, remove, and drag points.
 
-**Smooth** -- a simplified outline. A slider controls smoothing aggressiveness: range 0 to 1, step 0.05. Uses Chaikin subdivision, which always stays within the control polygon and never overshoots. Vertex editing is unavailable in this preview.
+**Smooth** -- a simplified outline. A slider controls smoothing aggressiveness: range 0 to 1, step 0.05. Uses physically bounded Chaikin subdivision, which stays within the control polygon without bowing long straight runs. Vertex editing is unavailable in this preview.
 
 Use the separate **Output: Smooth/Accurate** button to choose which outline is
 used for bins and SVG exports. This preference is saved with the tool.

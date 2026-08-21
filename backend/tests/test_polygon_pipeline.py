@@ -2,6 +2,7 @@
 run before clearance so the requested clearance is never consumed."""
 import numpy as np
 import pytest
+from shapely.geometry import Point as SPPoint
 from shapely.geometry import Polygon as SP
 
 from app.services.polygon_scaler import PolygonScaler, ScaledPolygon, smooth_epsilon
@@ -17,6 +18,21 @@ def _dense_square(side: float, pts_per_edge: int = 200) -> list[tuple[float, flo
         pts.append((side - side * i / pts_per_edge, side))
     for i in range(pts_per_edge):
         pts.append((0.0, side - side * i / pts_per_edge))
+    return pts
+
+
+def _dense_rectangle(
+    width: float, height: float, pts_per_edge: int = 200
+) -> list[tuple[float, float]]:
+    pts = []
+    for i in range(pts_per_edge):
+        pts.append((width * i / pts_per_edge, 0.0))
+    for i in range(pts_per_edge):
+        pts.append((width, height * i / pts_per_edge))
+    for i in range(pts_per_edge):
+        pts.append((width - width * i / pts_per_edge, height))
+    for i in range(pts_per_edge):
+        pts.append((0.0, height - height * i / pts_per_edge))
     return pts
 
 
@@ -55,6 +71,15 @@ class TestSmoothEpsilon:
 
 
 class TestPrepareForGeneration:
+    def test_smoothing_preserves_long_straight_edges(self, scaler):
+        raw = _dense_rectangle(84.0, 20.0)
+
+        prepared = scaler.prepare_for_generation(
+            _sp(raw), 0.0, smoothed=True, smooth_level=0.5
+        )
+
+        assert SP(prepared.points_mm).covers(SPPoint(20.0, 0.1))
+
     def test_smoothed_clearance_measured_from_smoothed_shape(self, scaler):
         """pocket must equal the previewed (smoothed) shape grown by clearance."""
         raw = _dense_square(141.4)

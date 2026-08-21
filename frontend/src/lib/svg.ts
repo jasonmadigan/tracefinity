@@ -1,5 +1,9 @@
 import type { Point } from '@/types'
 
+// Two millimetres keeps a smoothed right-angle corner within about 0.4mm.
+// Mirrored in backend polygon_scaler.py; keep preview and generation in lockstep.
+const CHAIKIN_CORNER_SPAN_MM = 2
+
 // ramer-douglas-peucker polygon simplification
 function perpendicularDist(p: Point, a: Point, b: Point): number {
   const dx = b.x - a.x
@@ -77,6 +81,27 @@ function chaikinSmooth(pts: Point[], iterations = 3): Point[] {
   return result
 }
 
+function addChaikinSupportPoints(pts: Point[]): Point[] {
+  const result: Point[] = []
+  for (let i = 0; i < pts.length; i++) {
+    const p0 = pts[i]
+    const p1 = pts[(i + 1) % pts.length]
+    result.push(p0)
+    const length = Math.hypot(p1.x - p0.x, p1.y - p0.y)
+    if (length <= CHAIKIN_CORNER_SPAN_MM) continue
+    const supportPositions = length <= 2 * CHAIKIN_CORNER_SPAN_MM
+      ? [0.5]
+      : [CHAIKIN_CORNER_SPAN_MM / length, 1 - CHAIKIN_CORNER_SPAN_MM / length]
+    for (const t of supportPositions) {
+      result.push({
+        x: p0.x + (p1.x - p0.x) * t,
+        y: p0.y + (p1.y - p0.y) * t,
+      })
+    }
+  }
+  return result
+}
+
 // clean near-collinear points (matches backend's post-chaikin simplify)
 function cleanChaikinOutput(pts: Point[]): Point[] {
   return simplifyPolygon(pts, 0.05)
@@ -88,7 +113,7 @@ function cleanChaikinOutput(pts: Point[]): Point[] {
  */
 function smoothRingPath(pts: Point[], s: number): string {
   if (pts.length < 3) return pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x * s} ${p.y * s}`).join(' ') + ' Z'
-  const smoothed = cleanChaikinOutput(chaikinSmooth(pts))
+  const smoothed = cleanChaikinOutput(chaikinSmooth(addChaikinSupportPoints(pts)))
   return smoothed.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x * s} ${p.y * s}`).join(' ') + ' Z'
 }
 
