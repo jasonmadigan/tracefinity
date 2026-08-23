@@ -52,6 +52,12 @@ tooling, or opportunistic cleanup into separate changes. A feature can fit the
 constitution and still be declined if the implementation is unsafe, too broad,
 or too expensive to maintain.
 
+Describe any user-visible behaviour change in the pull request, including a
+change that seems incidental to the main fix. Use `Closes #123` only when the
+pull request resolves the outcome reported in that issue. A mitigation,
+diagnostic improvement, or partial fix should use `Relates to #123` and leave the
+original problem open.
+
 Before submitting:
 
 ```bash
@@ -66,4 +72,5 @@ pnpm test
 
 If your local environment differs, run the equivalent complete backend and
 frontend suites and say exactly what you ran in the pull request. Compilation or
-`py_compile` alone is not test evidence.
+`py_compile` alone is not test evidence. Tests should assert the behaviour being
+changed, not just that some output was produced.

@@ -11,6 +11,10 @@ scope calls, informed by contributors, community interest, and what people
 actually use. These principles can change when the evidence or the needs of the
 project change.
 
+The [closed-item precedent audit](docs/scope-precedent-audit.md) records where
+these rules came from. It is supporting history; this document is the product
+guide.
+
 ## What we promise
 
 ### Free, open source, and self-hostable
@@ -25,6 +29,10 @@ core workflow must work without an account, API key, cloud service, or ongoing
 network connection. Remote services can improve or extend that workflow, but
 they cannot become the only way through it.
 
+Self-hostable does not mean every model must run on every machine. CPU, memory,
+architecture, and model requirements should be documented plainly so people can
+choose suitable hardware, a lighter local model, or an optional remote provider.
+
 ### User control
 
 Automation should do the tedious work without trapping the user in a bad
@@ -32,11 +40,25 @@ result. Traces and other decisions that affect the physical output must be
 inspectable and correctable. Optional enrichment, such as automatic names or
 categories, should fail without taking the rest of the workflow down.
 
+Failures must be visible and useful. A partial success must not look like a full
+success, and rejecting one invalid change should not silently discard unrelated
+valid work. Warn early when a capture or configuration is likely to produce a
+poor physical result, without blocking uncertain but potentially valid work.
+Where the preview is used to make physical decisions, it must agree with the
+geometry that will actually be exported for printing.
+
 Users own their data and must be able to export and delete it. Running locally
 must not send photos or project data to another service unless the user chooses
 a remote provider. When data does leave the installation, the product must say
 where it goes and what is known about retention. Original photos should not be
-kept longer than the workflow needs them.
+kept longer than the workflow needs them. Recoverable data must not be silently
+discarded or overwritten when a load, save, migration, or restore fails. A
+deletion must stay deleted; stale state or an in-flight save must not bring the
+data back.
+
+Export and backup do not automatically require dedicated application screens or
+APIs. A dependable, documented operation on Tracefinity's plain-file storage can
+meet the need with less product machinery.
 
 ### Single-user first, not security by obscurity
 
@@ -193,9 +215,9 @@ the full discussion.
 
 | Request | Decision | Why | Reconsider when |
 |-|-|-|-|
-| [#72: freeform bins](https://github.com/tracefinity/tracefinity/pull/72) | `OUT OF SCOPE` | Added arbitrary millimetre-sized output and a parallel bin model | The project deliberately changes its Gridfinity-only output boundary |
-| [#134: SVG import](https://github.com/tracefinity/tracefinity/pull/134) | `OUT OF SCOPE` | Bypassed raster capture and tracing with authored outlines | Community evidence justifies reconsidering the photographic-input boundary |
+| [#72: freeform bins](https://github.com/tracefinity/tracefinity/pull/72#issuecomment-4702528306) | `OUT OF SCOPE` | Added arbitrary millimetre-sized output and a parallel bin model | The project deliberately changes its Gridfinity-only output boundary |
+| [#134: SVG import](https://github.com/tracefinity/tracefinity/pull/134#issuecomment-4993340069) | `OUT OF SCOPE` | Bypassed raster capture and tracing with authored outlines | Community evidence justifies reconsidering the photographic-input boundary |
 | [#45: project planning](https://github.com/tracefinity/tracefinity/pull/45) | `IN SCOPE` | Planning traced tools across bins and drawers completes the core storage workflow | Not applicable |
-| [#101: half-grid bins](https://github.com/tracefinity/tracefinity/issues/101) and [#106: partial bins](https://github.com/tracefinity/tracefinity/issues/106) | `IN SCOPE` | Community-compatible extensions keep Gridfinity as the organising model | Not applicable |
-| [#56: backup API](https://github.com/tracefinity/tracefinity/pull/56) | `NOT A PRODUCT FEATURE` as proposed | Copying the plain-file storage volume and documenting it solved the need without new UI, API, or state | The platform-level approach becomes unsafe or unreasonably difficult |
-| [#11: Ollama saliency](https://github.com/tracefinity/tracefinity/issues/11) | `NOT A PRODUCT FEATURE` as proposed | A general LLM-serving interface was the wrong tool for pixel-level saliency; dedicated local models met the underlying need | A provider offers a technically suitable and well-supported saliency capability |
+| [#101: half-grid bins](https://github.com/tracefinity/tracefinity/issues/101) and [#112: partial bins](https://github.com/tracefinity/tracefinity/pull/112) | `IN SCOPE` | Community-compatible extensions keep Gridfinity as the organising model | Not applicable |
+| [#56: backup API](https://github.com/tracefinity/tracefinity/pull/56#issuecomment-4702507666) | `NOT A PRODUCT FEATURE` as proposed | Copying the plain-file storage volume and documenting it solved the need without new UI, API, or state | The platform-level approach becomes unsafe or unreasonably difficult |
+| [#11: Ollama saliency](https://github.com/tracefinity/tracefinity/issues/11#issuecomment-4085938154) | `NOT A PRODUCT FEATURE` as proposed | A general LLM-serving interface was the wrong tool for pixel-level saliency; dedicated local models met the underlying need | A provider offers a technically suitable and well-supported saliency capability |
