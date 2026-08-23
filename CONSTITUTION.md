@@ -203,6 +203,11 @@ Keep scope and implementation status separate in GitHub:
 - `scope:out-of-scope`
 - `status:needs-demand`
 - `status:blocked-by-cost`
+- `status:needs-retriage`
+
+`status:needs-retriage` is a prompt for human review when a closed request gets
+new interest. It does not change the request's scope verdict or reopen it by
+itself.
 
 When this direction changes, update this document through a maintainer-approved
 pull request and update the affected precedent or canonical request. Changing

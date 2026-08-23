@@ -40,10 +40,13 @@ we currently plan to work on it. Those are different decisions.
 | `scope:out-of-scope` | Conflicts with a settled boundary |
 | `status:needs-demand` | Fits, but current interest does not justify the work |
 | `status:blocked-by-cost` | Fits, but the implementation or maintenance burden is disproportionate |
+| `status:needs-retriage` | New interest in a closed request needs human review |
 
 An issue can be in scope and still be closed as `Not planned`. Closed canonical
 requests stay unlocked so reactions, concrete use cases, and related requests
-can provide evidence for re-triage.
+can provide evidence for re-triage. `status:needs-retriage` only flags that
+evidence for a person to assess; it does not change the existing scope decision
+or reopen the request automatically.
 
 ## Pull requests
 
