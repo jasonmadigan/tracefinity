@@ -1294,15 +1294,10 @@ def _manifold_to_trimesh(m):
     verts = mesh.vert_properties[:, :3].astype(np.float64)
     faces = mesh.tri_verts.astype(np.int64)
     tm = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
-    # merge near-duplicate vertices and drop degenerate faces that manifold
-    # boolean ops can introduce at intersection seams. trimesh's default merge
-    # tolerance is tighter than the ~1e-4mm gaps manifold3d leaves at some
-    # seams, so nondegenerate_faces() below would strip the resulting sliver
-    # triangle without first welding its vertices into their neighbors,
-    # opening a boundary hole where the sliver used to be (reproduced on a
-    # real export: three vertices ~2e-4mm apart, one dropped triangle, three
-    # boundary edges -- exactly what a slicer reports as non-manifold).
-    # 1e-3mm is far below FDM resolution, so this can't affect print fidelity.
+    # Merge near-duplicate vertices before dropping degenerate faces at boolean
+    # seams. Trimesh groups vertices by coordinates rounded to this precision;
+    # three decimal places welds the observed seam gaps on affected exports.
+    # The 0.001mm coordinate grid is far below FDM print resolution.
     tm.merge_vertices(digits_vertex=3)
     # drop zero-area faces, then clean up orphaned vertices
     mask = tm.nondegenerate_faces()
