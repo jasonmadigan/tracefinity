@@ -4,7 +4,7 @@ Hard-won lessons. Read before making changes to coordinate mapping, 3D preview, 
 
 ## Y-axis inversion
 
-SVG/layout/bin-space is Y-down (0 = top edge). build123d is Y-up. Always negate Y when mapping: `-(y + offset_y)`.
+SVG/layout/bin-space is Y-down (0 = top edge). Manifold3d is Y-up. Always negate Y when mapping: `-(y + offset_y)`.
 
 - Flipping Y reverses polygon winding -- remove any `reversed()` calls if adding a Y-flip
 - Text labels use a flipped Plane (z_dir down) so they negate Y separately
@@ -32,9 +32,13 @@ Single container runs both frontend and backend via supervisor. Key details:
 - `.dockerignore` excludes `docs/`, `node_modules/`, `venv/`, `storage/`, `.claude/`
 - Container runs as non-root user `tracefinity` (UID 1000) by default. Supports `--user "$(id -u):$(id -g)"` for arbitrary UIDs. Runtime-writable dirs (`/app/storage`, `/app/.u2net`, `/app/.next`, `/tmp/nginx`, `/tmp/supervisor`, `/var/lib/nginx`) are world-writable. `U2NET_HOME` and `HOME` are set to `/app` paths so model downloads and nginx/supervisor state work without root.
 
-## OCCT / build123d performance
+## Manifold3d boolean performance
 
-Boolean operations (add, subtract) are single-threaded in OCCT. More cores don't help. Polygon cutouts are batched into a single sketch + single extrude to minimise the number of booleans. Apple Silicon is ~7x faster single-thread than EPYC 7402 for these operations.
+The generator batches polygon cutters before subtracting them from the bin. Keep
+that batching: performing a separate mesh boolean for every cutout is much
+slower. Manifold3d replaced the original build123d/OCCT generator because its
+mesh booleans were measured at 10-100x faster for this workload. See
+[stl-generation.md](stl-generation.md) for the current pipeline.
 
 ## Frontend patterns
 

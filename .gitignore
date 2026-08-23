@@ -30,7 +30,10 @@ storage/
 # ide
 .idea/
 .vscode/
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/scope-triage/
 .planning/
 *.swp
 

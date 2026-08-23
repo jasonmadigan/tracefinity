@@ -261,6 +261,13 @@ Step-by-step usage guides covering each part of the workflow:
 
 [Gridfinity](https://gridfinity.xyz/) is a modular storage system designed by [Zack Freedman](https://www.youtube.com/watch?v=ra_9zU-mnl8). Bins snap into baseplates on a 42mm grid, making it easy to organise tools, components, and supplies. The system is open source and hugely popular in the 3D printing community.
 
+## Contributing
+
+Tracefinity has a deliberately focused product boundary. Read the
+[product constitution](CONSTITUTION.md) before proposing a substantial feature,
+then see [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
+[DESIGN.md](DESIGN.md) for engineering principles.
+
 ## Licence
 
 MIT

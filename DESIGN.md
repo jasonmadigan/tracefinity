@@ -1,46 +1,72 @@
-# Design Principles
+# Engineering design principles
 
-Decisions that guide contributions. Read this before opening a PR.
+[CONSTITUTION.md](CONSTITUTION.md) defines what product Tracefinity should be.
+[CONTRIBUTING.md](CONTRIBUTING.md) explains how to propose and submit changes.
+This document records the engineering decisions that should survive individual
+implementations.
 
-## Core
+## Coordinate systems
 
-- **Offline-first.** The app must work fully without network access or API keys. Network-dependent features are optional enhancements, never requirements.
-- **No assumed inference.** Tool identification, naming, and categorisation must not assume a specific ML model or remote service. These features should be behind pluggable interfaces with manual/simple fallbacks as the default.
-- **Coordinate system discipline.** SVG/layout Y is down; manifold3d Y is up. Always negate Y when crossing that boundary. See docs/gotchas.md.
+SVG and layout coordinates have Y increasing downwards. Manifold3d has Y
+increasing upwards. Negate Y whenever data crosses that boundary. See
+[docs/gotchas.md](docs/gotchas.md) for the consequences and regression traps.
 
-## Scope
+## Data and configuration
 
-Tracefinity is the photo-tracing-to-gridfinity pipeline. Photos are the input; gridfinity bins are the output. Features that serve this pipeline are in scope. Features that turn it into a general outline-to-bin converter are not.
+- New schema fields need defaults. Existing user data must continue to load
+  without a manual migration.
+- Explicit user and project settings take precedence over broader defaults.
+  Defaults must not silently replace a choice the user already saved.
+- Operations that replace user data must be atomic. Build the replacement first,
+  then swap it in; partial failure must not destroy the previous state.
+- Do not turn corrupt persistent data into an empty store and then overwrite the
+  evidence. Preserve the original and surface a useful error or recovery path.
+- Clean up files created by failed operations. Check failure paths as carefully
+  as the happy path, especially when several files or records must stay in sync.
+- `pydantic-settings` is the source of truth for backend configuration. Do not
+  read environment variables directly alongside `Settings`.
+- New configuration must have a safe, working default. Example resource values
+  must be realistic for Tracefinity, and optional platform-specific acceleration
+  must remain opt-in when making it the default would break supported installs.
+- Add a data or preference migration only for state a released version actually
+  wrote. A version bump must not erase saved choices merely because the current
+  code changed.
 
-**Non-goals:**
-- Alternative outline import formats (SVG, DXF, STL, manual drawing). See #134.
-- Non-gridfinity output (freeform bin dimensions, non-standard grids). See #72.
-- General-purpose 2D-to-3D conversion unrelated to the tracing workflow.
+## Integration boundaries
 
-## Architecture
-
-- **Keep PRs focused.** One concern per PR. If you're touching unrelated files (sidebar width, dev scripts, polish), split them out.
-- **Backward compatible schemas.** New fields must have defaults. Existing data must load without migration.
-- **Tests must actually run.** Run the backend `pytest` suite and frontend `pnpm test` suite before submitting; compilation alone is not enough.
+Integrations depend on Tracefinity capabilities, not provider-specific concepts.
+Keep provider code behind adapters so adding or removing one does not leak its
+assumptions through routes, storage, and UI state.
 
 ## Frontend
 
-- **State complexity budget.** If a component has more than ~8 useState hooks, extract related state into a custom hook or sub-component.
-- **No polling when SSE/websockets fit.** For background tasks that update UI, prefer server-sent events over polling loops.
+- Treat roughly eight `useState` hooks in one component as a prompt to extract a
+  coherent custom hook or sub-component. Count relationships, not merely lines.
+- For background work that updates the UI, prefer server-sent events or
+  websockets to polling loops.
+- One failed request should not blank unrelated data that loaded successfully.
+  Show partial failure and keep the rest of the page useful.
+- Guard repeated submissions and stale async responses so a slow operation
+  cannot overwrite a newer choice.
+- User-facing status, errors, and controls must remain readable and operable in
+  each supported theme and without relying on colour alone.
 
-## Backend
+## Verification
 
-- **Atomic data operations.** Anything that replaces user data must be atomic (swap, not clear-then-copy). Partial failure must not lose data.
-- **Single source of truth for config.** Use pydantic-settings. Don't read env vars directly alongside Settings.
+Tests need to exercise the changed behaviour, not merely prove that it compiles
+or returns non-empty geometry. Assert the physical property or user outcome that
+could regress, including failure and compatibility paths where relevant. Preview
+math and generated geometry should use the same rule or have a test proving they
+agree.
 
-## Linting
+Run the backend `pytest` suite and frontend `pnpm test` suite before submitting.
+Run `make lint`; CI enforces the same backend lint, frontend lint, and type
+checks.
 
-Run `make lint` before submitting a PR. CI enforces the same checks on all PRs and pushes to main.
-
-| Layer | Tool | Config |
-|-|-|
-| Python | [ruff](https://docs.astral.sh/ruff/) | `pyproject.toml` -- E/F/W/I rules, E402+E501 ignored |
-| TypeScript | ESLint + `eslint-config-next` | `frontend/eslint.config.mjs` |
+| Layer | Tool | Configuration |
+|-|-|-|
+| Python | [ruff](https://docs.astral.sh/ruff/) | `pyproject.toml` (`E/F/W/I`, with `E402` and `E501` ignored) |
+| TypeScript | ESLint with `eslint-config-next` | `frontend/eslint.config.mjs` |
 | Types | `tsc --noEmit` | `frontend/tsconfig.json` |
 
-Targets: `make lint-backend`, `make lint-frontend`, `make lint-fix` (auto-fix where possible).
+Useful targets: `make lint-backend`, `make lint-frontend`, and `make lint-fix`.
