@@ -42,11 +42,19 @@ we currently plan to work on it. Those are different decisions.
 | `status:blocked-by-cost` | Fits, but the implementation or maintenance burden is disproportionate |
 | `status:needs-retriage` | New interest in a closed request needs human review |
 
-An issue can be in scope and still be closed as `Not planned`. Closed canonical
-requests stay unlocked so reactions, concrete use cases, and related requests
-can provide evidence for re-triage. `status:needs-retriage` only flags that
-evidence for a person to assess; it does not change the existing scope decision
-or reopen the request automatically.
+An issue can be in scope and still be closed as `Not planned`. A canonical
+scope request is an issue carrying one of the three `scope:*` verdict labels.
+Closed canonical requests stay unlocked so reactions, concrete use cases, and
+related requests can provide evidence for re-triage. `status:needs-retriage`
+only flags that evidence for a person to assess; it does not change the existing
+scope decision or reopen the request automatically.
+
+Human re-triage uses the repository's `scope-triage` skill. Review emoji
+reactions, substantive comments, linked or duplicate requests, and reopening
+history together. Automation flags qualifying comments and reopenings, but
+GitHub Actions has no event for new reactions. Scheduled reaction polling and
+stored baselines are deferred until repository activity justifies that added
+machinery.
 
 ## Pull requests
 

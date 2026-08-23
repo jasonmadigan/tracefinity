@@ -6,6 +6,18 @@ on:
   pull_request:
 
 jobs:
+  workflow-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --test .github/scripts/*.test.js
+
   backend-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
