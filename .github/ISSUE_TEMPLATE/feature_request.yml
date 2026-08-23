@@ -1,0 +1,50 @@
+name: Feature request
+description: Propose an improvement to Tracefinity
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Tracefinity focuses on turning photos or scans of physical objects into Gridfinity-compatible storage.
+
+        Please read the [product constitution](https://github.com/tracefinity/tracefinity/blob/main/CONSTITUTION.md) before building a substantial feature. If your idea tests a boundary, opening the issue is the right first step.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What are you trying to do?
+      description: Describe the result you need and the problem it solves. Focus on the outcome rather than a particular implementation.
+      placeholder: I want to...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: workflow
+    attributes:
+      label: Which part of the workflow does this affect?
+      options:
+        - Photo capture and scale calibration
+        - Tracing and outline editing
+        - Tool library and projects
+        - Bin design and Gridfinity geometry
+        - Export and printing
+        - Security, reliability, deployment, or accessibility
+        - Other or unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Does this add a new input or output mode?
+      description: For example, importing authored geometry or generating something other than Gridfinity-compatible storage. It is fine to say no or unsure.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What alternatives have you tried?
+      description: Include configuration, existing features, or other tools if relevant.

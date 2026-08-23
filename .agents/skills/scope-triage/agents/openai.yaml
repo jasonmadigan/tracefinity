@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scope triage"
+  short_description: "Evaluate feature requests against the constitution"
+  default_prompt: "Use $scope-triage to evaluate this request against the Tracefinity product constitution."
