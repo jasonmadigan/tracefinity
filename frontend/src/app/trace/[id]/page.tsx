@@ -1,18 +1,20 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useRouter, useParams } from 'next/navigation'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { useDebouncedSave } from '@/hooks/useDebouncedSave'
-import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
+import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight, RotateCcw, Pencil } from 'lucide-react'
 import { PaperCornerEditor } from '@/components/PaperCornerEditor'
 import { PolygonEditor } from '@/components/PolygonEditor'
 import { SessionInfo } from '@/components/SessionInfo'
 import { Alert } from '@/components/Alert'
-import { getSession, setCorners, traceTools, updatePolygons, updateSession, getImageUrl, getAvailableKeys, traceFromMask, saveToolsFromSession } from '@/lib/api'
+import { getSession, setCorners, traceTools, updatePolygons, updateSession, getImageUrl, getAvailableKeys, traceFromMask, saveToolsFromSession, listPhotoStations, listPhotoStationSuggestions, reusePhotoStationCorners, redetectCorners } from '@/lib/api'
+import { cn } from '@/lib/utils'
+import { useTheme } from '@/hooks/useTheme'
 import { CornersHint, TraceHint, EditHint } from '@/components/OnboardingIllustrations'
 import { PhotoWarningsBanner } from '@/components/PhotoWarningsBanner'
 import { StepBar } from '@/components/StepBar'
-import type { PaperSize, PhotoWarning, Point, Polygon, Session } from '@/types'
+import type { PaperSize, PhotoWarning, Point, Polygon, Session, PhotoStation, PhotoStationSuggestion } from '@/types'
 
 type Step = 'corners' | 'trace' | 'edit'
 
@@ -35,6 +37,7 @@ const TRACE_STEPS = [
   'Generating silhouette mask...',
   'Processing mask...',
   'Tracing contours...',
+  'Finalizing outlines...',
 ]
 
 function normalizedToolLabel(label: string, index: number) {
@@ -48,10 +51,239 @@ function normalizePolygonLabels(polygons: Polygon[]) {
   }))
 }
 
+const TRACER_PREFERENCE_KEY = 'tracefinity.trace.preferredTracer'
+
+function getPreferredTracerId(availableTracers: { id: string; label: string }[]): string | null {
+  if (typeof window === 'undefined') return null
+  const saved = window.localStorage.getItem(TRACER_PREFERENCE_KEY)
+  if (!saved) return null
+  return availableTracers.some((tracer) => tracer.id === saved) ? saved : null
+}
+
+function rememberTracerId(tracerId: string | null | undefined) {
+  if (!tracerId || typeof window === 'undefined') return
+  window.localStorage.setItem(TRACER_PREFERENCE_KEY, tracerId)
+}
+
+function paperSizeLabel(size: PaperSize): string {
+  return PAPER_SIZE_OPTIONS.find((option) => option.value === size)?.label ?? size
+}
+
+type StateSetter<T> = (value: T | ((current: T) => T)) => void
+
+function usePhotoStations({
+  enabled,
+  sessionId,
+  requestedStationId,
+  hasCaptureStep,
+  stationWasAppliedOnUpload,
+  session,
+  paperSize,
+  setSession,
+  setLocalCorners,
+  setPaperSize,
+  setError,
+}: {
+  enabled: boolean
+  sessionId: string
+  requestedStationId: string | null
+  hasCaptureStep: boolean
+  stationWasAppliedOnUpload: boolean
+  session: Session | null
+  paperSize: PaperSize
+  setSession: StateSetter<Session | null>
+  setLocalCorners: StateSetter<Point[]>
+  setPaperSize: StateSetter<PaperSize>
+  setError: StateSetter<string | null>
+}) {
+  const [photoStations, setPhotoStations] = useState<PhotoStation[]>([])
+  const [stationSuggestions, setStationSuggestions] = useState<PhotoStationSuggestion[]>([])
+  const [photoStationCount, setPhotoStationCount] = useState(0)
+  const [stationNotice, setStationNotice] = useState<string | null>(null)
+  const [stationNoticeTone, setStationNoticeTone] = useState<'success' | 'warning'>('success')
+  const [saveAsStation, setSaveAsStation] = useState(false)
+  const [stationName, setStationName] = useState(() => `Station ${new Date().toISOString().slice(0, 10)}`)
+  const [reusingStationId, setReusingStationId] = useState<string | null>(null)
+  const [redetectingCorners, setRedetectingCorners] = useState(false)
+  const [activePhotoStationId, setActivePhotoStationId] = useState<string | null>(null)
+  const autoStationAppliedRef = useRef(false)
+
+  const refreshStationSuggestions = useCallback(async () => {
+    if (!enabled) return
+    try {
+      const [result, stations] = await Promise.all([
+        listPhotoStationSuggestions(sessionId),
+        listPhotoStations().catch(() => photoStations),
+      ])
+      setPhotoStations(stations)
+      setStationSuggestions(result.suggestions)
+      setPhotoStationCount(stations.length || result.station_count)
+    } catch {
+      setStationSuggestions([])
+    }
+  }, [enabled, sessionId, photoStations])
+
+  useEffect(() => {
+    if (!enabled) {
+      setPhotoStations([])
+      setStationSuggestions([])
+      setPhotoStationCount(0)
+      setActivePhotoStationId(null)
+      setStationNotice(null)
+      setSaveAsStation(false)
+      return
+    }
+
+    let cancelled = false
+    Promise.all([
+      listPhotoStationSuggestions(sessionId).catch(() => ({ suggestions: [], station_count: 0 })),
+      listPhotoStations().catch(() => []),
+    ]).then(([stationData, stationList]) => {
+      if (cancelled) return
+      setPhotoStations(stationList)
+      setStationSuggestions(stationData.suggestions)
+      setPhotoStationCount(stationList.length || stationData.station_count)
+    })
+    return () => { cancelled = true }
+  }, [enabled, sessionId])
+
+  const handleReuseStation = useCallback(async (stationId: string) => {
+    if (!enabled) return
+    setReusingStationId(stationId)
+    setError(null)
+    setStationNotice(null)
+
+    try {
+      const result = await reusePhotoStationCorners(sessionId, stationId)
+      setLocalCorners(result.corners)
+      setPaperSize(result.paper_size)
+      setSession((current) => current ? {
+        ...current,
+        corners: result.corners,
+        paper_size: result.paper_size,
+      } : current)
+      setActivePhotoStationId(result.suggestion.station.id)
+      setStationSuggestions((current) => current.map((suggestion) =>
+        suggestion.station.id === result.suggestion.station.id ? result.suggestion : suggestion
+      ))
+      setStationNoticeTone(result.suggestion.warnings.length > 0 ? 'warning' : 'success')
+      setStationNotice(result.suggestion.warnings.length > 0 ? result.suggestion.warnings.join(' ') : 'Station reused.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to reuse station')
+    } finally {
+      setReusingStationId(null)
+    }
+  }, [enabled, sessionId, setError, setLocalCorners, setPaperSize, setSession])
+
+  const handleStationSelect = useCallback((stationId: string) => {
+    if (!enabled) return
+    if (!stationId) {
+      setActivePhotoStationId(null)
+      setStationNotice(null)
+      return
+    }
+    const suggestion = stationSuggestions.find((item) => item.station.id === stationId)
+    if (!suggestion) {
+      setActivePhotoStationId(null)
+      setStationNoticeTone('warning')
+      setStationNotice('Selected station does not match this image.')
+      return
+    }
+    void handleReuseStation(stationId)
+  }, [enabled, handleReuseStation, stationSuggestions])
+
+  useEffect(() => {
+    if (!enabled) return
+    if (!requestedStationId || !hasCaptureStep || !stationWasAppliedOnUpload || !session || stationSuggestions.length === 0 || autoStationAppliedRef.current) return
+    const suggestion = stationSuggestions.find((item) => item.station.id === requestedStationId)
+    if (!suggestion) return
+
+    autoStationAppliedRef.current = true
+    setActivePhotoStationId(suggestion.station.id)
+
+    if (stationWasAppliedOnUpload) {
+      setStationNoticeTone('success')
+      setStationNotice('Station reused.')
+    }
+  }, [enabled, requestedStationId, hasCaptureStep, stationWasAppliedOnUpload, session, stationSuggestions])
+
+  const handleRedetectCorners = useCallback(async () => {
+    if (!enabled) return
+    setRedetectingCorners(true)
+    setError(null)
+    setStationNotice(null)
+
+    try {
+      const result = await redetectCorners(sessionId)
+      setLocalCorners(result.corners)
+      setSession((current) => current ? {
+        ...current,
+        corners: result.corners,
+        paper_size: current.paper_size || paperSize,
+      } : current)
+      setActivePhotoStationId(null)
+      setStationNoticeTone('success')
+      setStationNotice('Corners redetected.')
+      await refreshStationSuggestions()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to redetect corners')
+    } finally {
+      setRedetectingCorners(false)
+    }
+  }, [enabled, paperSize, refreshStationSuggestions, sessionId, setError, setLocalCorners, setSession])
+
+  const registerCreatedStation = useCallback((station: PhotoStation) => {
+    setActivePhotoStationId(station.id)
+    setPhotoStations((current) => [station, ...current.filter((item) => item.id !== station.id)])
+    setStationSuggestions((current) => [{
+      station,
+      match_status: 'exact',
+      width_delta_percent: 0,
+      height_delta_percent: 0,
+      max_corner_drift_px: 0,
+      max_corner_drift_percent: 0,
+      warnings: [],
+    }, ...current.filter((suggestion) => suggestion.station.id !== station.id)])
+    setPhotoStationCount((count) => count + 1)
+    setStationNoticeTone('success')
+    setStationNotice('Station saved.')
+  }, [])
+
+  const stationSuggestionById = useMemo(
+    () => new Map(stationSuggestions.map((suggestion) => [suggestion.station.id, suggestion])),
+    [stationSuggestions],
+  )
+
+  return {
+    activePhotoStationId,
+    handleRedetectCorners,
+    handleStationSelect,
+    photoStationCount,
+    photoStations,
+    redetectingCorners,
+    registerCreatedStation,
+    reusingStationId,
+    saveAsStation,
+    setSaveAsStation,
+    setStationName,
+    stationName,
+    stationNotice,
+    stationNoticeTone,
+    stationSuggestionById,
+  }
+}
+
 export default function TracePage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
+  const { theme } = useTheme()
   const sessionId = params.id as string
+  const hasCaptureStep = searchParams.get('capture') === '1'
+  const requestedStationId = searchParams.get('station')
+  const stationWasAppliedOnUpload = searchParams.get('stationApplied') === '1'
+  const fromSaveAndNewLoop = searchParams.get('loop') === '1'
+  const skipToSaveRequested = searchParams.get('skipToSave') === '1'
 
   const [session, setSession] = useState<Session | null>(null)
   const [step, setStep] = useState<Step>('corners')
@@ -89,6 +321,38 @@ export default function TracePage() {
   const maskInputRef = useRef<HTMLInputElement>(null)
   const statusInterval = useRef<NodeJS.Timeout | null>(null)
   const polygonsDirtyRef = useRef(false)
+  const [photoStationsEnabled, setPhotoStationsEnabled] = useState(false)
+  const autoSelectedSkipToolsRef = useRef(false)
+
+  const {
+    activePhotoStationId,
+    handleRedetectCorners,
+    handleStationSelect,
+    photoStationCount,
+    photoStations,
+    redetectingCorners,
+    registerCreatedStation,
+    reusingStationId,
+    saveAsStation,
+    setSaveAsStation,
+    setStationName,
+    stationName,
+    stationNotice,
+    stationNoticeTone,
+    stationSuggestionById,
+  } = usePhotoStations({
+    enabled: photoStationsEnabled,
+    sessionId,
+    requestedStationId,
+    hasCaptureStep,
+    stationWasAppliedOnUpload,
+    session,
+    paperSize,
+    setSession,
+    setLocalCorners,
+    setPaperSize,
+    setError,
+  })
 
   useEffect(() => {
     if (!methodOpen) return
@@ -110,9 +374,12 @@ export default function TracePage() {
         setHasEnvKey(keys.google)
         setProviderLabel(keys.provider_label)
         setProviderType(keys.provider)
-        setTracers(keys.tracers || [])
-        if (keys.tracers?.length) setSelectedTracer(keys.tracers[0].id)
-
+        setPhotoStationsEnabled(keys.photo_stations)
+        const availableTracers = keys.tracers || []
+        setTracers(availableTracers)
+        if (availableTracers.length) {
+          setSelectedTracer(getPreferredTracerId(availableTracers) || availableTracers[0].id)
+        }
         if (!keys.google) {
           setProvider('manual')
         }
@@ -157,6 +424,12 @@ export default function TracePage() {
     }
   }, [session, step, correctedImageUrl, sessionId])
 
+  useEffect(() => {
+    if (!skipToSaveRequested || autoSelectedSkipToolsRef.current || step !== 'edit' || polygons.length === 0) return
+    autoSelectedSkipToolsRef.current = true
+    setIncludedPolygons(new Set(polygons.map((poly) => poly.id)))
+  }, [skipToSaveRequested, step, polygons])
+
   const singleTracer = tracers.length <= 1
 
   const markPolygonsDirty = useCallback(() => {
@@ -170,11 +443,19 @@ export default function TracePage() {
     setError(null)
 
     try {
-      const result = await setCorners(sessionId, corners, paperSize)
+      const result = await setCorners(
+        sessionId,
+        corners,
+        paperSize,
+        photoStationsEnabled && saveAsStation ? stationName : null,
+      )
       setCorrectedImageUrl(result.corrected_image_url)
       setImageVersion(Date.now())
       setPhotoWarnings(result.warnings ?? [])
       setWarningsDismissed(false)
+      if (photoStationsEnabled && result.station) {
+        registerCreatedStation(result.station)
+      }
 
       if (singleTracer && tracers.length === 1) {
         // single tracer: trace immediately without changing step
@@ -187,6 +468,7 @@ export default function TracePage() {
 
         try {
           const tid = tracers[0].id
+          rememberTracerId(tid)
           const traceResult = await traceTools(
             sessionId, 'google',
             hasEnvKey ? undefined : apiKey,
@@ -222,6 +504,7 @@ export default function TracePage() {
       setError('please enter your API key')
       return
     }
+    rememberTracerId(tid)
 
     setProcessing(true)
     setError(null)
@@ -334,7 +617,7 @@ export default function TracePage() {
     }
   }, [])
 
-  async function handleSaveToLibrary() {
+  async function handleSaveToLibrary(nextPath: string = '/') {
     if (includedPolygons.size === 0) return
     setSaving(true)
     setError(null)
@@ -344,7 +627,7 @@ export default function TracePage() {
       await updatePolygons(sessionId, normalized)
       polygonsDirtyRef.current = false
       await saveToolsFromSession(sessionId, Array.from(includedPolygons))
-      router.push('/')
+      router.push(nextPath)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to save tools')
     } finally {
@@ -369,10 +652,15 @@ export default function TracePage() {
     )
   }
 
-  const steps = singleTracer ? ['Corners', 'Save'] : ['Corners', 'Trace', 'Save']
-  const stepIndex = singleTracer
+  const traceSteps = singleTracer ? ['Corners', 'Save'] : ['Corners', 'Trace', 'Save']
+  const steps = hasCaptureStep ? ['Capture', ...traceSteps] : traceSteps
+  const traceStepIndex = singleTracer
     ? (step === 'corners' ? 0 : 1)
     : (step === 'corners' ? 0 : step === 'trace' ? 1 : 2)
+  const stepIndex = hasCaptureStep ? traceStepIndex + 1 : traceStepIndex
+  const saveAndNewPath = activePhotoStationId
+    ? `/trace?station=${encodeURIComponent(activePhotoStationId)}&loop=1`
+    : '/trace'
 
   return (
     <div className="h-[calc(100vh-44px)] flex flex-col w-full">
@@ -380,8 +668,18 @@ export default function TracePage() {
         steps={steps}
         current={stepIndex}
         onStepClick={(i) => {
-          if (i === 0) setStep('corners')
-          else if (!singleTracer && i === 1 && correctedImageUrl) setStep('trace')
+          if (hasCaptureStep && i === 0) {
+            const params = new URLSearchParams()
+            if (activePhotoStationId) {
+              params.set('station', activePhotoStationId)
+            }
+            if (fromSaveAndNewLoop) params.set('loop', '1')
+            router.push(`/trace?${params.toString()}`)
+            return
+          }
+          const traceIndex = hasCaptureStep ? i - 1 : i
+          if (traceIndex === 0) setStep('corners')
+          else if (!singleTracer && traceIndex === 1 && correctedImageUrl) setStep('trace')
         }}
       />
       <div className="flex-1 flex flex-col md:flex-row min-h-0">
@@ -420,6 +718,95 @@ export default function TracePage() {
                   ))}
                 </div>
               </div>
+
+              {photoStationsEnabled && (
+                <>
+                  <div className="border-t border-border-subtle pt-3">
+                    <button
+                      type="button"
+                      onClick={handleRedetectCorners}
+                      disabled={processing || redetectingCorners || !session?.original_image_path}
+                      className="btn-secondary w-full py-1.5 text-sm inline-flex items-center justify-center gap-1.5"
+                    >
+                      {redetectingCorners ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                      {redetectingCorners ? 'Detecting...' : 'Redetect Corners'}
+                    </button>
+                  </div>
+
+                  <div className="border-t border-border-subtle pt-3 space-y-2">
+                    <h3 className="text-[10px] font-semibold text-text-muted uppercase tracking-widest">
+                      Photo Station
+                    </h3>
+                    <select
+                      value={activePhotoStationId || ''}
+                      onChange={(e) => handleStationSelect(e.target.value)}
+                      disabled={processing || reusingStationId !== null || photoStationCount === 0}
+                      className="w-full h-9 px-2 rounded-[8px] bg-elevated border border-border-subtle text-sm text-text-primary focus:outline-none focus:border-accent"
+                    >
+                      <option value="">
+                        {photoStationCount > 0 ? 'No station' : 'No stations saved'}
+                      </option>
+                      {photoStations.map((station) => {
+                        const suggestion = stationSuggestionById.get(station.id)
+                        const matched = Boolean(suggestion)
+                        return (
+                          <option key={station.id} value={station.id} disabled={!matched}>
+                            {station.name} - {paperSizeLabel(station.paper_size)} - {matched ? 'Matched' : 'Not matched'}
+                          </option>
+                        )
+                      })}
+                    </select>
+
+                    {reusingStationId && (
+                      <div className="flex items-center gap-2 text-xs text-text-muted">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                        <span>Reusing station...</span>
+                      </div>
+                    )}
+
+                    {photoStationCount === 0 && (
+                      <p className="text-xs text-text-muted">
+                        Confirm the first setup, then save it for repeated phone photos.
+                      </p>
+                    )}
+
+                    {stationNotice && (
+                      <p className={cn(
+                        "text-xs leading-snug",
+                        stationNoticeTone === 'success'
+                          ? 'text-green-400'
+                          : theme === 'dark' ? 'text-amber-300' : 'text-amber-600',
+                      )}>
+                        {stationNotice}
+                      </p>
+                    )}
+
+                    <label className="min-h-11 flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={saveAsStation}
+                        onChange={(e) => setSaveAsStation(e.target.checked)}
+                        className="w-4 h-4 rounded border-border-subtle bg-elevated accent-sky-500"
+                      />
+                      Save Station
+                    </label>
+                    {saveAsStation && (
+                      <div>
+                        <label className="text-xs text-text-primary tracking-[0.3px]" htmlFor="photo-station-name">
+                          Station name
+                        </label>
+                        <input
+                          id="photo-station-name"
+                          type="text"
+                          value={stationName}
+                          onChange={(e) => setStationName(e.target.value)}
+                          className="w-full min-h-11 px-3 mt-1.5 text-sm border border-border-subtle rounded bg-elevated text-text-primary focus:outline-none focus:border-accent"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -447,7 +834,12 @@ export default function TracePage() {
                         return (
                           <button
                             key={t.id}
-                            onClick={() => { setSelectedTracer(t.id); setProvider('google'); setMethodOpen(false) }}
+                            onClick={() => {
+                              setSelectedTracer(t.id)
+                              rememberTracerId(t.id)
+                              setProvider('google')
+                              setMethodOpen(false)
+                            }}
                             className={`w-full text-left px-3 py-1.5 text-xs transition-colors cursor-pointer flex items-center gap-2 ${
                               active ? 'text-accent' : 'text-text-secondary hover:bg-glass-hover hover:text-text-primary'
                             }`}
@@ -571,13 +963,31 @@ export default function TracePage() {
           {step === 'edit' && (
             <div className="space-y-3">
               <EditHint />
-              <p className="text-xs text-text-muted">
-                {polygons.length === 0
-                  ? 'No tools were detected.'
-                  : includedPolygons.size === 0
-                    ? 'Click outlines to select which tools to save.'
-                    : `${includedPolygons.size} of ${polygons.length} selected. Click to add or remove.`}
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="min-w-0 text-xs text-text-muted">
+                  {polygons.length === 0
+                    ? 'No tools were detected.'
+                    : `${includedPolygons.size} of ${polygons.length} selected.`}
+                </p>
+                {polygons.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setIncludedPolygons(new Set(polygons.map((p) => p.id)))}
+                      className="rounded border border-border-subtle px-2 py-0.5 text-[11px] font-medium text-text-secondary hover:bg-elevated hover:text-text-primary transition-colors"
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIncludedPolygons(new Set())}
+                      className="rounded border border-border-subtle px-2 py-0.5 text-[11px] font-medium text-text-secondary hover:bg-elevated hover:text-text-primary transition-colors"
+                    >
+                      None
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {polygons.length > 0 && (
                 <div className="text-xs space-y-0.5">
@@ -712,12 +1122,20 @@ export default function TracePage() {
           {step === 'edit' && (
             <>
               <button
-                onClick={handleSaveToLibrary}
+                onClick={() => handleSaveToLibrary()}
                 disabled={includedPolygons.size === 0 || saving}
                 className="btn-primary w-full py-2 text-sm inline-flex items-center justify-center gap-1.5"
               >
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                 {saving ? 'Saving...' : includedPolygons.size === 0 ? 'Select tools to save' : `Save ${includedPolygons.size} tool${includedPolygons.size === 1 ? '' : 's'}`}
+              </button>
+              <button
+                onClick={() => handleSaveToLibrary(saveAndNewPath)}
+                disabled={includedPolygons.size === 0 || saving}
+                className="btn-secondary w-full py-2 text-sm inline-flex items-center justify-center gap-1.5"
+              >
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {saving ? 'Saving...' : 'Save and New'}
               </button>
               <button
                 onClick={() => setStep('trace')}

@@ -439,7 +439,7 @@ export default function HomePage() {
     setError(null)
     try {
       const result = await uploadImage(file)
-      router.push(`/trace/${result.session_id}`)
+      router.push(`/trace/${result.session_id}?capture=1`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'upload failed')
     } finally {
@@ -552,7 +552,11 @@ export default function HomePage() {
     <div className="max-w-6xl mx-auto py-4 space-y-6">
       {/* upload */}
       <div data-tour="upload">
-        <ImageUploader onUpload={handleUpload} disabled={uploading} />
+        <ImageUploader
+          onUpload={handleUpload}
+          onCaptureRequest={() => router.push('/trace')}
+          disabled={uploading}
+        />
       </div>
 
       {uploading && (
