@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { useDebouncedSave } from '@/hooks/useDebouncedSave'
+import { usePolygonSelection } from '@/hooks/usePolygonSelection'
 import { Loader2, Copy, Upload, Download, Check, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
 import { PaperCornerEditor } from '@/components/PaperCornerEditor'
 import { PolygonEditor } from '@/components/PolygonEditor'
@@ -83,7 +84,7 @@ export default function TracePage() {
   const [showPrompt, setShowPrompt] = useState(false)
   const [traceStatus, setTraceStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [includedPolygons, setIncludedPolygons] = useState<Set<string>>(new Set())
+  const [includedPolygons, setIncludedPolygons] = usePolygonSelection(polygons)
   const [editingPolygonLabelId, setEditingPolygonLabelId] = useState<string | null>(null)
   const [hoveredPolygon, setHoveredPolygon] = useState<string | null>(null)
   const maskInputRef = useRef<HTMLInputElement>(null)
