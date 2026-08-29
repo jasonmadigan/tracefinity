@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from posixpath import normpath
 
@@ -11,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.config import settings
+from app.services.output_retention import retention_loop
 from app.services.store_errors import StoreClosedError
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -64,6 +66,15 @@ def _configure_uvicorn_logging():
             h.setFormatter(fmt)
 
 
+@app.on_event("startup")
+async def _start_output_retention():
+    if settings.stl_retention_hours > 0:
+        # reference kept on app.state so the task is not garbage collected
+        app.state.output_retention_task = asyncio.create_task(
+            retention_loop(settings.storage_path, settings.stl_retention_hours)
+        )
+
+
 class ProxySecretMiddleware(BaseHTTPMiddleware):
     """only trust user-scoped headers from an authenticated proxy."""
 
@@ -105,6 +116,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # frontend blob downloads read the server-set filename cross-origin in dev
+    expose_headers=["Content-Disposition"],
 )
 
 app.mount("/storage", StaticFiles(directory=str(settings.storage_path)), name="storage")

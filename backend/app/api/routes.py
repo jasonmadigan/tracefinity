@@ -644,6 +644,13 @@ def _run_generate(
         if not (output_path.exists() and hash_path.exists() and hash_path.read_text() == input_hash):
             return None
         part_paths = sorted(user_path.glob(f"outputs/{entity_id}_part*.stl"))
+        # cache hits rewrite nothing, so refresh mtimes or the retention
+        # sweep could purge artefacts a live page was just handed urls for
+        for artefact in (output_path, hash_path, threemf_path, zip_path, insert_path, *part_paths):
+            try:
+                os.utime(artefact)
+            except FileNotFoundError:
+                pass
         stl_urls = [f"/storage/{user_id}/outputs/{p.name}" for p in part_paths]
         insert_stl_url = (
             f"/storage/{user_id}/outputs/{entity_id}_insert.stl"
@@ -1425,8 +1432,12 @@ async def download_stl(request: Request, session_id: str, user_id: str = Depends
     if not session or not session.stl_path:
         raise HTTPException(status_code=404, detail="stl not found")
 
+    stl_abs = _abs(session.stl_path)
+    if not Path(stl_abs).exists():
+        raise HTTPException(status_code=404, detail="stl expired; regenerate the bin")
+
     return FileResponse(
-        _abs(session.stl_path),
+        stl_abs,
         media_type="application/sla",
         filename=f"tracefinity-{session_id[:8]}.stl",
     )
@@ -1437,6 +1448,10 @@ async def download_zip(request: Request, session_id: str, user_id: str = Depends
     up = _user_path(user_id)
     zip_path = up / "outputs" / f"{session_id}_parts.zip"
     if not zip_path.exists():
+        user_sessions, _, _ = get_stores(user_id)
+        session = user_sessions.get(session_id)
+        if session and session.stl_path:
+            raise HTTPException(status_code=404, detail="zip expired; regenerate the bin")
         raise HTTPException(status_code=404, detail="zip not found")
 
     return FileResponse(
@@ -1455,7 +1470,7 @@ async def download_threemf(request: Request, session_id: str, user_id: str = Dep
 
     threemf_path = Path(_abs(session.stl_path)).with_suffix(".3mf")
     if not threemf_path.exists():
-        raise HTTPException(status_code=404, detail="3mf not found")
+        raise HTTPException(status_code=404, detail="3mf expired; regenerate the bin")
 
     return FileResponse(
         str(threemf_path),
@@ -2190,8 +2205,11 @@ async def download_bin_stl(request: Request, bin_id: str, user_id: str = Depends
     bin_data = user_bins.get(bin_id)
     if not bin_data or not bin_data.stl_path:
         raise HTTPException(status_code=404, detail="stl not found")
+    stl_abs = _abs(bin_data.stl_path)
+    if not Path(stl_abs).exists():
+        raise HTTPException(status_code=404, detail="stl expired; regenerate the bin")
     return FileResponse(
-        _abs(bin_data.stl_path),
+        stl_abs,
         media_type="application/sla",
         filename=f"{_bin_stem(bin_data)}.stl",
     )
@@ -2201,10 +2219,12 @@ async def download_bin_stl(request: Request, bin_id: str, user_id: str = Depends
 async def download_bin_zip(request: Request, bin_id: str, user_id: str = Depends(get_user_id)):
     _, _, user_bins = get_stores(user_id)
     up = _user_path(user_id)
+    bin_data = user_bins.get(bin_id)
     zip_path = up / "outputs" / f"{bin_id}_parts.zip"
     if not zip_path.exists():
+        if bin_data and bin_data.stl_path:
+            raise HTTPException(status_code=404, detail="zip expired; regenerate the bin")
         raise HTTPException(status_code=404, detail="zip not found")
-    bin_data = user_bins.get(bin_id)
     fname = f"{_bin_stem(bin_data)}-parts.zip" if bin_data else f"{bin_id[:8]}-parts.zip"
     return FileResponse(
         str(zip_path),
@@ -2221,7 +2241,7 @@ async def download_bin_threemf(request: Request, bin_id: str, user_id: str = Dep
         raise HTTPException(status_code=404, detail="3mf not found")
     threemf_path = Path(_abs(bin_data.stl_path)).with_suffix(".3mf")
     if not threemf_path.exists():
-        raise HTTPException(status_code=404, detail="3mf not found")
+        raise HTTPException(status_code=404, detail="3mf expired; regenerate the bin")
     return FileResponse(
         str(threemf_path),
         media_type="application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
@@ -2233,10 +2253,12 @@ async def download_bin_threemf(request: Request, bin_id: str, user_id: str = Dep
 async def download_bin_insert(request: Request, bin_id: str, user_id: str = Depends(get_user_id)):
     _, _, user_bins = get_stores(user_id)
     up = _user_path(user_id)
+    bin_data = user_bins.get(bin_id)
     insert_path = up / "outputs" / f"{bin_id}_insert.stl"
     if not insert_path.exists():
+        if bin_data and bin_data.stl_path:
+            raise HTTPException(status_code=404, detail="insert stl expired; regenerate the bin")
         raise HTTPException(status_code=404, detail="insert stl not found")
-    bin_data = user_bins.get(bin_id)
     fname = f"{_bin_stem(bin_data)}-insert.stl" if bin_data else f"{bin_id[:8]}-insert.stl"
     return FileResponse(
         str(insert_path),

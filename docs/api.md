@@ -76,3 +76,7 @@ Response fields:
 - `GET /api/files/bins/{bin_id}/bin.stl` - bin STL
 - `GET /api/files/bins/{bin_id}/bin.3mf` - bin 3MF
 - `GET /api/files/bins/{bin_id}/bin_parts.zip` - bin split parts
+
+Exports are subject to the retention sweep (`STL_RETENTION_HOURS`, see
+[stl-generation.md](stl-generation.md)); a purged file returns `404` until the
+bin is regenerated.
