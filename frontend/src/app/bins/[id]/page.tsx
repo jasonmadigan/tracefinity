@@ -8,6 +8,7 @@ import { BinPreview3D } from '@/components/BinPreview3D'
 import { ToolBrowser } from '@/components/ToolBrowser'
 import { getBin, updateBin, generateBinStl, getBinStlUrl, getBinZipUrl, getBinThreemfUrl, getBinInsertUrl, getImageUrl, listTools, updateTool } from '@/lib/api'
 import { buildBinConfig, createPartialBinsValues, getDefaultBinConfig, resetDefaultBinConfig, saveDefaultBinConfig } from '@/lib/binDefaults'
+import { downloadExport } from '@/lib/download'
 import type { BinConfig, BinData, PlacedTool, TextLabel } from '@/types'
 import { Download, Loader2, Package, ChevronDown, Check, TriangleAlert } from 'lucide-react'
 import { Breadcrumb } from '@/components/Breadcrumb'
@@ -356,20 +357,34 @@ export default function BinPage() {
     setPlacedTools(prev => [...prev, placed])
   }, [config.grid_x, config.grid_y, config.wall_thickness, config.cutout_clearance, config.half_grid_base])
 
+  // the retention sweep purges exports, so a stale tab's file may be gone;
+  // downloadExport regenerates from saved state and retries before failing
+  const handleExport = useCallback(async (url: string) => {
+    try {
+      await downloadExport(url, async () => {
+        // clear the dedupe key or an unchanged layout skips regeneration
+        lastGenerateRef.current = ''
+        await doGenerate()
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'export download failed')
+    }
+  }, [doGenerate])
+
   function handleDownload() {
-    window.open(getBinStlUrl(binId), '_blank')
+    handleExport(getBinStlUrl(binId))
   }
 
   function handleDownloadZip() {
-    window.open(getBinZipUrl(binId), '_blank')
+    handleExport(getBinZipUrl(binId))
   }
 
   function handleDownloadThreemf() {
-    window.open(getBinThreemfUrl(binId), '_blank')
+    handleExport(getBinThreemfUrl(binId))
   }
 
   function handleDownloadInsert() {
-    window.open(getBinInsertUrl(binId), '_blank')
+    handleExport(getBinInsertUrl(binId))
   }
 
   function showDefaultsStatus(message: string) {

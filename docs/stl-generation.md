@@ -17,6 +17,26 @@ The limit is per process, not shared across processes or replicas. Tracefinity
 currently runs as a single backend process, so a value of `1` serializes STL
 generation for the standard deployment.
 
+## Export retention
+
+Generated exports are regenerable from the stored polygons and bin config, so
+they are not kept indefinitely. A background sweep runs every 15 minutes and
+deletes export files older than `STL_RETENTION_HOURS` (default 24). Set it to
+`0` to keep exports forever.
+
+The sweep only removes files directly inside each user's `outputs/` directory
+with an export suffix: `.stl`, `.3mf`, `.zip`, and the `.hash` cache marker.
+Photos, traces, tools, bins, projects, and session data are never touched.
+
+Opening a bin page re-requests generation, which either refreshes the existing
+files (cache hit, which also resets their retention clock) or rebuilds them
+from saved state. The bin page's export buttons also recover on demand: a
+download that finds its file purged regenerates the bin and retries. Trace
+pages never request generation, so a purged session-flow export stays gone
+until generation is requested again. A purged export endpoint returns `404`
+with `<artefact> expired; regenerate the bin` when a prior generation is on
+record, and `<artefact> not found` otherwise.
+
 ## Z-Axis Reference Heights
 
 - **Base top**: 4.75mm (three tapered layers: 2.15 + 1.8 + 0.8). Infill starts here.
