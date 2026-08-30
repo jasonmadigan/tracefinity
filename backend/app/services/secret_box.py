@@ -18,6 +18,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.config import settings
+from app.services.durable_write import fsync_directory
 
 AUTH_SECRET_FILENAME = "auth_secret"
 _KEY_INFO = b"tracefinity-secret-box-v1"
@@ -39,11 +40,16 @@ def get_auth_secret() -> str:
         return path.read_text().strip()
     secret = secrets.token_urlsafe(32)
     try:
+        # written once, at first boot, and never again: if power loss drops
+        # it every stored second factor becomes undecryptable
         with os.fdopen(fd, "w") as f:
             f.write(secret + "\n")
+            f.flush()
+            os.fsync(f.fileno())
     except Exception:
         path.unlink(missing_ok=True)
         raise
+    fsync_directory(path.parent)
     return secret
 
 
