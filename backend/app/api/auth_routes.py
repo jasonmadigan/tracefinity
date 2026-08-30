@@ -45,7 +45,7 @@ from app.services import namespace_tombstones, secret_box, totp
 from app.services.account_store import get_account_store
 from app.services.auth_token_store import get_auth_token_store
 from app.services.login_rate_limit import login_limiter
-from app.services.namespace_tombstones import NamespaceDeletionPendingError
+from app.services.namespace_tombstones import NamespaceNotClaimableError
 from app.services.password_hashing import (
     dummy_verify,
     hash_password,
@@ -186,10 +186,13 @@ def setup_first_admin(req: SetupRequest, response: Response):
         storage_namespace="default",
     )
     # the claim is what makes a leftover default namespace dangerous, so it is
-    # checked before an account is created that would point at it
+    # checked before an account is created that would point at it. adopting is
+    # the point of this route: it exists to take a single-user install into
+    # authenticated use with its library intact, and it only opens on an
+    # instance with no accounts. a tombstone still refuses it
     try:
-        namespace_tombstones.claim(account.storage_namespace)
-    except NamespaceDeletionPendingError as exc:
+        namespace_tombstones.claim(account.storage_namespace, adopt_existing=True)
+    except NamespaceNotClaimableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not get_account_store().create_first_admin(account):
         raise HTTPException(status_code=409, detail="setup has already been completed")

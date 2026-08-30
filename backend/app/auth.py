@@ -91,6 +91,17 @@ class AdminPrincipal:
     token_id: str | None = None
 
     @property
+    def is_token(self) -> bool:
+        """whether an admin token, rather than a login session, authenticated.
+
+        the one discriminator the token restrictions test, so they cannot
+        drift apart. only the token branch of get_admin_principal ever sets
+        token_id, and it sets it from a record whose field is a str, so the
+        default None means a session and nothing else.
+        """
+        return self.token_id is not None
+
+    @property
     def actor(self) -> str:
         if self.token_id:
             return f"{self.account.id} via token {self.token_id}"

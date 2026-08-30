@@ -1,10 +1,10 @@
-"""a namespace whose files outlive their owner must not be claimable.
+"""a namespace holding one party's files must not be handed to another.
 
-native deletion removes the account record before the storage directory, so a
-failed rmtree, or a process killed between the two, leaves files with no owner.
-the reusable `default` namespace makes that a cross-tenant exposure: the store
-is empty again, first-run setup reopens, and the next administrator would
-inherit the previous owner's files.
+an account opens onto a storage namespace and can read and write everything
+under it, so claiming an occupied directory hands over its contents. the two
+ways a directory ends up occupied and unowned are covered here: a deletion
+that destroyed the account record and then failed to remove the files, which
+leaves a marker, and everything else, which does not.
 """
 import os
 import shutil
@@ -202,7 +202,7 @@ def test_a_namespace_holding_only_a_directory_symlink_is_refused(auth_mode_setti
     (namespace / "link").symlink_to(elsewhere, target_is_directory=True)
     namespace_tombstones.mark("default")
 
-    with pytest.raises(namespace_tombstones.NamespaceDeletionPendingError):
+    with pytest.raises(namespace_tombstones.NamespaceNotClaimableError):
         namespace_tombstones.claim("default")
     assert (elsewhere / "inner" / "canary.txt").read_text() == "private"
 
@@ -217,8 +217,136 @@ def test_a_namespace_that_cannot_be_inspected_is_refused(auth_mode_settings):
     os.chmod(unreadable, 0o000)
     namespace_tombstones.mark("default")
     try:
-        with pytest.raises(namespace_tombstones.NamespaceDeletionPendingError):
+        with pytest.raises(namespace_tombstones.NamespaceNotClaimableError):
             namespace_tombstones.claim("default")
     finally:
         os.chmod(unreadable, 0o700)
     assert (unreadable / "canary.txt").read_text() == "private"
+
+
+def test_an_unmarked_namespace_holding_files_is_not_claimable(
+    native_client, auth_mode_settings
+):
+    """the marker records that someone got as far as marking, nothing more.
+
+    an account creation interrupted before its record landed, or a restored
+    volume whose users.json did not come with it, leaves a namespace full of
+    one party's files and no marker at all. claiming it hands a new account
+    read and write access to them.
+    """
+    resp = native_client.post("/api/auth/setup", json=ADMIN)
+    assert resp.status_code == 200, resp.text
+    canary = _canary(auth_mode_settings, PROXY_USER)
+    assert namespace_tombstones.is_marked(PROXY_USER) is False
+
+    resp = native_client.post(
+        "/api/admin/users",
+        json={"id": PROXY_USER, "email": "user@example.com", "password": "a fine password"},
+    )
+    assert resp.status_code == 409, resp.text
+    assert "already holds files" in resp.json()["detail"]
+    assert canary.read_text() == "private"
+
+
+def test_a_refused_claim_creates_no_account(native_client, auth_mode_settings):
+    """the claim runs before the store write, so nothing half-lands"""
+    resp = native_client.post("/api/auth/setup", json=ADMIN)
+    assert resp.status_code == 200, resp.text
+    _canary(auth_mode_settings, PROXY_USER)
+    before = get_account_store().count()
+
+    resp = native_client.post(
+        "/api/admin/users",
+        json={"id": PROXY_USER, "email": "user@example.com", "password": "a fine password"},
+    )
+    assert resp.status_code == 409, resp.text
+    assert get_account_store().count() == before
+    assert get_account_store().get(PROXY_USER) is None
+    assert get_account_store().get_by_email("user@example.com") is None
+    # and the refused email is still free for a later, valid create
+    resp = native_client.post(
+        "/api/admin/users", json={"email": "user@example.com", "password": "a fine password"}
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_an_unmarked_empty_namespace_stays_claimable(native_client, auth_mode_settings):
+    """the ordinary case: scaffolding with nothing in it is nobody's data"""
+    from app.config import ensure_user_dirs
+
+    ensure_user_dirs(auth_mode_settings / PROXY_USER)
+
+    resp = native_client.post("/api/auth/setup", json=ADMIN)
+    assert resp.status_code == 200, resp.text
+    resp = native_client.post(
+        "/api/admin/users",
+        json={"id": PROXY_USER, "email": "user@example.com", "password": "a fine password"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_a_zero_byte_file_counts_as_content(auth_mode_settings):
+    """size is not ownership: an empty file is still someone's, and a
+    namespace holding one is not the untouched directory it looks like"""
+    namespace = auth_mode_settings / PROXY_USER
+    (namespace / "uploads").mkdir(parents=True)
+    (namespace / "uploads" / ".hidden").touch()
+
+    with pytest.raises(namespace_tombstones.NamespaceNotClaimableError):
+        namespace_tombstones.claim(PROXY_USER)
+
+
+def test_admin_create_can_adopt_a_namespace_on_request(native_client, auth_mode_settings):
+    """importing an account from a prior system onto its own storage.
+
+    the refusal is about doing this by accident, so the deliberate form of it
+    stays available and says so in the request.
+    """
+    resp = native_client.post("/api/auth/setup", json=ADMIN)
+    assert resp.status_code == 200, resp.text
+    canary = _canary(auth_mode_settings, PROXY_USER)
+
+    resp = native_client.post(
+        "/api/admin/users",
+        json={
+            "id": PROXY_USER,
+            "email": "user@example.com",
+            "password": "a fine password",
+            "adopt_existing_storage": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert canary.read_text() == "private"
+
+
+def test_adopting_never_overrides_an_unfinished_deletion(native_client, auth_mode_settings):
+    """a marker means these files' owner was destroyed, which no import
+    intends to inherit; the operator removes the directory instead"""
+    resp = native_client.post("/api/auth/setup", json=ADMIN)
+    assert resp.status_code == 200, resp.text
+    canary = _canary(auth_mode_settings, PROXY_USER)
+    namespace_tombstones.mark(PROXY_USER)
+
+    resp = native_client.post(
+        "/api/admin/users",
+        json={
+            "id": PROXY_USER,
+            "email": "user@example.com",
+            "password": "a fine password",
+            "adopt_existing_storage": True,
+        },
+    )
+    assert resp.status_code == 409, resp.text
+    assert "did not finish" in resp.json()["detail"]
+    assert canary.read_text() == "private"
+
+
+def test_first_run_setup_still_claims_pre_auth_data(native_client, auth_mode_settings):
+    """the documented upgrade from open mode: the first administrator takes
+    over the single-user library in place, and no marker exists to allow it"""
+    canary = _canary(auth_mode_settings, "default")
+    assert namespace_tombstones.is_marked("default") is False
+
+    resp = native_client.post("/api/auth/setup", json=ADMIN)
+    assert resp.status_code == 200, resp.text
+    assert canary.read_text() == "private"

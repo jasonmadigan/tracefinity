@@ -12,6 +12,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from app.auth import AUTH_COOKIE_NAME
+from app.services import namespace_tombstones
+from app.services.account_store import get_account_store
 from app.services.auth_token_store import ADMIN_TOKEN_PREFIX, get_auth_token_store
 from tests.conftest import set_auth_mode
 from tests.test_auth_native import create_user, login, setup_admin
@@ -599,6 +601,137 @@ def test_a_session_administrator_keeps_every_ability(native_client):
 
     second = TestClient(native_client.app)
     assert login(second, "second@example.com", "reset by a session").status_code == 200
+
+
+# --- a token cannot reach another party's storage ---
+#
+# the account id is the storage namespace, so a caller that chooses the id
+# chooses the directory. adoption opens an account onto one that already holds
+# files, which is a deliberate restore an operator performs on data they are
+# placing there, not something an unattended credential does.
+
+# valid cuid per auth._USER_ID_RE
+VICTIM_NAMESPACE = "cjld2cjxh0000qzrmn831i7rn"
+
+
+def _plant(storage, namespace):
+    """a namespace holding one party's tools, owned by no account here"""
+    ns = storage / namespace
+    ns.mkdir(parents=True, exist_ok=True)
+    (ns / "tools.json").write_text(json.dumps({
+        "t1": {
+            "id": "t1",
+            "name": "victim spanner",
+            "points": [],
+            "created_at": "2026-01-01T00:00:00",
+        }
+    }))
+    return ns
+
+
+def test_token_cannot_adopt_a_namespace_holding_another_party_files(
+    native_client, auth_mode_settings
+):
+    """the whole exploit in one test: name the namespace, adopt it, log in.
+
+    it stops at the first request, and the account the attacker would have
+    logged in as is never created, so the files stay unreachable.
+    """
+    _, api = admin_with_token(native_client)
+    _plant(auth_mode_settings, VICTIM_NAMESPACE)
+    assert namespace_tombstones.is_marked(VICTIM_NAMESPACE) is False
+
+    resp = api.post(USERS, json={
+        "id": VICTIM_NAMESPACE,
+        "email": "attacker@example.com",
+        "password": "a long enough password",
+        "adopt_existing_storage": True,
+    })
+    assert resp.status_code == 403, resp.text
+    assert "adopt existing storage" in resp.json()["detail"]
+
+    # refused, not quietly downgraded to a create that skipped the adoption
+    emails = [u["email"] for u in native_client.get(USERS).json()["users"]]
+    assert "attacker@example.com" not in emails
+    assert get_account_store().get(VICTIM_NAMESPACE) is None
+
+    # and there is no account to log in as, so the tools are unreachable
+    thief = TestClient(native_client.app)
+    assert login(thief, "attacker@example.com", "a long enough password").status_code == 401
+    assert thief.get("/api/tools").status_code == 401
+
+
+def test_the_refusal_does_not_depend_on_what_the_namespace_holds(native_client):
+    """asked on the request field, so an empty namespace answers the same.
+
+    a refusal that turned on the state of the volume would tell the holder
+    which namespaces are occupied, and would open a window between the check
+    and files arriving.
+    """
+    _, api = admin_with_token(native_client)
+    resp = api.post(USERS, json={
+        "id": VICTIM_NAMESPACE,
+        "email": "attacker@example.com",
+        "password": "a long enough password",
+        "adopt_existing_storage": True,
+    })
+    assert resp.status_code == 403, resp.text
+
+
+def test_token_still_creates_accounts_without_asking_to_adopt(native_client):
+    """the refusal is about the adoption, not about creating: ordinary
+    provisioning lands on an empty namespace and is untouched"""
+    _, api = admin_with_token(native_client)
+    resp = api.post(USERS, json={
+        "id": VICTIM_NAMESPACE,
+        "email": "member@example.com",
+        "password": "member password",
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["id"] == VICTIM_NAMESPACE
+
+
+def test_token_asking_for_both_an_administrator_and_adoption_is_refused(
+    native_client, auth_mode_settings
+):
+    """the two token rules do not cover for each other; either alone refuses"""
+    _, api = admin_with_token(native_client)
+    _plant(auth_mode_settings, VICTIM_NAMESPACE)
+
+    resp = api.post(USERS, json={
+        "id": VICTIM_NAMESPACE,
+        "email": "escalated@example.com",
+        "password": "a long enough password",
+        "is_admin": True,
+        "adopt_existing_storage": True,
+    })
+    assert resp.status_code == 403, resp.text
+    emails = [u["email"] for u in native_client.get(USERS).json()["users"]]
+    assert "escalated@example.com" not in emails
+
+
+def test_a_session_administrator_can_still_adopt(native_client, auth_mode_settings):
+    """restoring an account onto storage carried over with it stays available.
+
+    the CLI creates the first administrator only, so this endpoint is the only
+    way to put the second and later accounts back on their own data.
+    """
+    setup_admin(native_client)
+    _plant(auth_mode_settings, VICTIM_NAMESPACE)
+
+    resp = native_client.post(USERS, json={
+        "id": VICTIM_NAMESPACE,
+        "email": "restored@example.com",
+        "password": "a long enough password",
+        "adopt_existing_storage": True,
+    })
+    assert resp.status_code == 200, resp.text
+
+    restored = TestClient(native_client.app)
+    assert login(restored, "restored@example.com", "a long enough password").status_code == 200
+    tools = restored.get("/api/tools")
+    assert tools.status_code == 200, tools.text
+    assert [t["name"] for t in tools.json()["tools"]] == ["victim spanner"]
 
 
 # --- the admin router denies by default ---

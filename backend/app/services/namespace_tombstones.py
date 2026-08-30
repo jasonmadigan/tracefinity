@@ -1,17 +1,26 @@
-"""markers for storage namespaces whose deletion did not finish.
+"""the rule for handing a storage namespace to a new owner.
 
-deleting a user destroys the identity that owns a namespace before it
-destroys the files, so a failed rmtree, or a process killed between the two
-steps, leaves a directory with no owner. that namespace is then claimable:
-`default` by the next first-run administrator, and an account id by an admin
-create that supplies the same id. either way a new owner inherits the
-previous owner's files.
+a namespace is a directory of one party's files, and an account whose
+storage namespace points at it can read and write all of them. so a claim is
+refused whenever the directory already holds files, and allowed when it is
+empty or absent, which is the ordinary case.
 
-the marker is written before anything is destroyed, and lives beside the
-namespace rather than inside it, so the rmtree meant to clear it cannot
-remove the marker first and leave the files behind. it outlives the process,
-so a claim-time check covers a kill between the two steps that no in-request
-compensation can reach.
+that turns on what is on the volume rather than on a marker, because the
+states that produce an occupied but unowned namespace do not all leave one.
+an account creation interrupted before its record landed leaves the
+directory it made, and a storage volume restored without its users.json
+leaves every namespace on it.
+
+markers cover the state that no directory inspection can explain. deleting a
+user destroys the identity that owns a namespace before it destroys the
+files, so a failed rmtree, or a process killed between the two steps, leaves
+files whose owner is gone. the marker is written before anything is
+destroyed, and lives beside the namespace rather than inside it, so the
+rmtree meant to clear it cannot remove the marker first and leave the files
+behind. it outlives the process, so a claim-time check covers a kill between
+the two steps that no in-request compensation can reach, and it distinguishes
+files an operator may deliberately adopt from files whose owner this instance
+already destroyed.
 """
 from __future__ import annotations
 
@@ -25,8 +34,8 @@ from app.config import settings
 _MARKER_PREFIX = ".pending-deletion-"
 
 
-class NamespaceDeletionPendingError(RuntimeError):
-    """files outlived their owner; the namespace must not be handed to anyone"""
+class NamespaceNotClaimableError(RuntimeError):
+    """the namespace holds files; handing it over would hand over the files"""
 
 
 def _marker_path(namespace: str) -> Path:
@@ -57,7 +66,10 @@ def holds_files(path: Path) -> bool:
 
     a partial rmtree, or a later request recreating the empty scaffolding,
     leaves directories with nothing in them, and there is nothing to inherit
-    there. a symlink counts as content even when it points at a directory:
+    there. anything else counts, at any depth and whatever its size: an empty
+    or hidden file is still a record that somebody was here, and a namespace
+    holding one is not the untouched directory it would otherwise look like.
+    a symlink counts as content even when it points at a directory:
     following it would report on a tree that is not this namespace's, and
     handing the link to a new owner hands them whatever it points at. so
     does anything that cannot be inspected, because an unreadable directory
@@ -83,21 +95,38 @@ def holds_files(path: Path) -> bool:
     return False
 
 
-def claim(namespace: str):
+def claim(namespace: str, *, adopt_existing: bool = False):
     """let a new owner take this namespace, or refuse it.
+
+    refuse when the directory holds files. a marker is not the condition,
+    only the reason: an unmarked namespace full of files is someone's data
+    just the same, and marking is the step an interrupted deletion is most
+    likely to have reached, not the step it is likely to have missed.
 
     a marked namespace with no files left only records a deletion that
     finished without clearing its marker, so the marker goes and the claim
-    proceeds. one that still holds files outlived its owner: refuse rather
-    than hand a new account someone else's data. an operator resolves it by
-    removing the directory, which is the deletion that was asked for.
+    proceeds. an operator resolves the refusal by removing the directory,
+    which for a marked namespace is the deletion that was asked for.
+
+    `adopt_existing` is for the callers whose purpose is to take over data
+    already on the volume: first-run setup claiming pre-auth single-user
+    data, and an import placing an account back on the storage it owned on a
+    previous instance. it never overrides a marker, because those files'
+    owner was destroyed here and no import means to inherit that.
     """
-    if not is_marked(namespace):
-        return
-    if holds_files(settings.storage_path / namespace):
-        raise NamespaceDeletionPendingError(
-            f"storage namespace '{namespace}' still holds files from a deletion "
-            "that did not finish; remove that directory from the storage volume "
-            "before creating an account that would claim it"
+    marked = is_marked(namespace)
+    if (marked or not adopt_existing) and holds_files(settings.storage_path / namespace):
+        if marked:
+            raise NamespaceNotClaimableError(
+                f"storage namespace '{namespace}' still holds files from a deletion "
+                "that did not finish; remove that directory from the storage volume "
+                "before creating an account that would claim it"
+            )
+        raise NamespaceNotClaimableError(
+            f"storage namespace '{namespace}' already holds files, and an account "
+            "created here would take over data it does not own; use a different "
+            "account id, or remove that directory from the storage volume, unless "
+            "adopting those files is the intent"
         )
-    clear(namespace)
+    if marked:
+        clear(namespace)
