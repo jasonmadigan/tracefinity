@@ -78,6 +78,7 @@ class AdminCreateUserRequest(BaseModel):
     # import path: verify-as-is bcrypt ($2a/$2b/$2y) or native $scrypt$
     password_hash: str | None = None
     id: str | None = None
+    # session only: an admin token is refused rather than downgraded
     is_admin: bool = False
     totp_secret: str | None = None  # base32
     backup_code_hashes: list[str] | None = None

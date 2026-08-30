@@ -46,7 +46,12 @@ pending token is still good.
 Administrator API tokens authenticate the user-management endpoints above with
 `Authorization: Bearer <token>`, without a password or second factor. They do
 not reach `clear-2fa`, the token endpoints themselves, `storage-stats`, or
-anything outside `/api/admin/users`. See [auth.md](auth.md).
+anything outside `/api/admin/users`.
+
+Within those endpoints a token cannot create an administrator (`is_admin: true`
+is `403`) or write to an account that is one, so create, disable, enable and
+reset-password apply to ordinary accounts only. Listing is unrestricted. An
+administrator session keeps all of it. See [auth.md](auth.md).
 
 ## Sessions (trace workflow)
 - `POST /api/upload` - upload image, auto-detect corners

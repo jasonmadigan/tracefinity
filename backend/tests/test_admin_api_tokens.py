@@ -484,3 +484,149 @@ def test_issue_and_revoke_are_recorded(native_client, caplog):
 
     assert _lines(caplog, f"admin {admin['id']} issued admin token {issued['id']}")
     assert _lines(caplog, f"admin {admin['id']} revoked admin token {issued['id']}")
+
+
+# --- a token cannot reach administrator authority ---
+#
+# a token authenticates with no password step and no second factor. every
+# test here covers a route by which the holder of one could obtain a session,
+# a successor credential, or control of an account carrying more authority
+# than the token itself.
+
+
+def test_token_cannot_create_an_administrator(native_client):
+    """the whole containment model rests on this: an administrator the token
+    minted is one it can then log in as, interactively, with everything"""
+    _, api = admin_with_token(native_client)
+    resp = api.post(
+        USERS,
+        json={"email": "escalated@example.com", "password": "a long enough password",
+              "is_admin": True},
+    )
+    assert resp.status_code == 403, resp.text
+    # refused, not quietly downgraded to a member account
+    emails = [u["email"] for u in native_client.get(USERS).json()["users"]]
+    assert "escalated@example.com" not in emails
+
+
+def test_token_still_creates_ordinary_accounts(native_client):
+    """the refusal is about the administrator bit, not about creating"""
+    _, api = admin_with_token(native_client)
+    resp = api.post(USERS, json={"email": "member@example.com", "password": "member password",
+                                 "is_admin": False})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["is_admin"] is False
+
+
+def test_token_cannot_reset_an_administrator_password(native_client):
+    """reset it and the holder logs in as that administrator interactively"""
+    _, api = admin_with_token(native_client)
+    other = create_user(native_client, email="second@example.com",
+                        password="second password", is_admin=True)
+
+    resp = api.post(f"{USERS}/{other['id']}/reset-password",
+                    json={"password": "seized by the token"})
+    assert resp.status_code == 403, resp.text
+
+    fresh = TestClient(native_client.app)
+    assert login(fresh, "second@example.com", "seized by the token").status_code == 401
+    assert login(fresh, "second@example.com", "second password").status_code == 200
+
+
+def test_token_cannot_reset_the_password_of_its_own_issuer(native_client):
+    _, api = admin_with_token(native_client)
+    issuer = native_client.get("/api/auth/me").json()
+    resp = api.post(f"{USERS}/{issuer['id']}/reset-password",
+                    json={"password": "seized by the token"})
+    assert resp.status_code == 403, resp.text
+
+
+def test_token_cannot_disable_an_administrator(native_client):
+    """disabling every other administrator locks out the humans who could
+    revoke the token"""
+    _, api = admin_with_token(native_client)
+    other = create_user(native_client, email="second@example.com",
+                        password="second password", is_admin=True)
+
+    assert api.post(f"{USERS}/{other['id']}/disable").status_code == 403
+    listed = {u["id"]: u for u in native_client.get(USERS).json()["users"]}
+    assert listed[other["id"]]["disabled"] is False
+
+
+def test_token_cannot_enable_an_administrator(native_client):
+    """restoring an administrator a human suspended is the same authority in
+    the other direction"""
+    _, api = admin_with_token(native_client)
+    other = create_user(native_client, email="second@example.com",
+                        password="second password", is_admin=True)
+    assert native_client.post(f"{USERS}/{other['id']}/disable").status_code == 200
+
+    assert api.post(f"{USERS}/{other['id']}/enable").status_code == 403
+    listed = {u["id"]: u for u in native_client.get(USERS).json()["users"]}
+    assert listed[other["id"]]["disabled"] is True
+
+
+def test_the_escalation_chain_is_blocked_at_its_first_step(native_client):
+    """mint an administrator, log in as it, mint a successor token, strip the
+    root administrator's second factor. it stops at the first request.
+    """
+    _, api = admin_with_token(native_client)
+    root = native_client.get("/api/auth/me").json()
+
+    assert api.post(USERS, json={"email": "escalated@example.com",
+                                 "password": "a long enough password",
+                                 "is_admin": True}).status_code == 403
+
+    session = TestClient(native_client.app)
+    assert login(session, "escalated@example.com", "a long enough password").status_code == 401
+    assert session.post(TOKENS, json={}).status_code == 401
+    assert session.post(f"{USERS}/{root['id']}/clear-2fa").status_code == 401
+
+
+def test_a_session_administrator_keeps_every_ability(native_client):
+    """the refusals are scoped to the credential, not to the operation"""
+    setup_admin(native_client)
+    other = create_user(native_client, email="second@example.com",
+                        password="second password", is_admin=True)
+    assert other["is_admin"] is True
+
+    assert native_client.post(f"{USERS}/{other['id']}/reset-password",
+                              json={"password": "reset by a session"}).status_code == 204
+    assert native_client.post(f"{USERS}/{other['id']}/disable").status_code == 200
+    assert native_client.post(f"{USERS}/{other['id']}/enable").status_code == 200
+    assert native_client.post(f"{USERS}/{other['id']}/clear-2fa").status_code == 204
+    assert native_client.post(TOKENS, json={}).status_code == 200
+
+    second = TestClient(native_client.app)
+    assert login(second, "second@example.com", "reset by a session").status_code == 200
+
+
+# --- the admin router denies by default ---
+
+
+def test_an_undeclared_route_on_the_admin_router_is_not_anonymous(native_client):
+    """the token and session split is declared per route, so the router needs
+    a default: a route added later without one must not be open to anyone.
+    """
+    from fastapi import APIRouter, FastAPI
+
+    import app.api.admin_routes as admin_routes
+
+    assert admin_routes.router.dependencies, "the admin router declares no default dependency"
+
+    probe = APIRouter(dependencies=admin_routes.router.dependencies)
+
+    @probe.get("/admin/undeclared")
+    def undeclared():
+        return {"reached": True}
+
+    app = FastAPI()
+    app.include_router(probe, prefix="/api")
+    setup_admin(native_client)
+
+    anonymous = TestClient(app)
+    assert anonymous.get("/api/admin/undeclared").status_code == 401
+
+    authed = TestClient(app)
+    authed.cookies.update(native_client.cookies)
+    assert authed.get("/api/admin/undeclared").status_code == 200

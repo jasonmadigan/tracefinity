@@ -9,7 +9,15 @@ two dependencies split this surface. get_admin_principal accepts either a
 login session or an admin token, and covers the provisioning routes.
 get_admin_session_principal accepts a session only, and covers clearing a
 second factor and managing the tokens themselves: neither belongs to a
-credential that authenticates without a second factor.
+credential that authenticates without a second factor. the router declares
+the first as its default, so a route added without an explicit dependency is
+authenticated rather than anonymous.
+
+across the routes a token does reach, one further rule holds: a token neither
+creates an administrator nor writes to an account that is one. a token
+authenticates with no password step and no second factor, so an administrator
+it could mint or seize is an interactive login it could take, and every
+containment decision here would fall with it.
 
 every mutation logs principal.actor, which names the account and, when a
 token was used, the token.
@@ -59,7 +67,27 @@ from app.services.password_hashing import hash_password, is_supported_hash
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+# denied by default: an undeclared route inherits an administrator check
+# rather than being open. session-only routes narrow it further, and both
+# must pass
+router = APIRouter(dependencies=[Depends(get_admin_principal)])
+
+
+def _refuse_token_write_to_admin(principal: AdminPrincipal, live: Account) -> None:
+    """stop an admin token writing to an account that holds full authority.
+
+    a token holder who can reset an administrator's password logs in as them
+    interactively, and one who can suspend administrators locks out the humans
+    who could revoke the token. checked against the live record inside the
+    store lock, so it cannot race a change to the target's admin bit.
+    """
+    if principal.token_id is None or not live.is_admin:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="an admin token cannot modify an administrator account; "
+        "use an administrator session",
+    )
 
 
 @router.get("/admin/users", response_model=AdminUserListResponse)
@@ -72,6 +100,14 @@ def list_users(principal: AdminPrincipal = Depends(get_admin_principal)):
 def create_user(
     req: AdminCreateUserRequest, principal: AdminPrincipal = Depends(get_admin_principal)
 ):
+    if req.is_admin and principal.token_id is not None:
+        # refused rather than downgraded: a provisioning script that asked for
+        # an administrator must not be told it got one
+        raise HTTPException(
+            status_code=403,
+            detail="an admin token cannot create an administrator; "
+            "use an administrator session",
+        )
     # validate everything before touching the store: a partial failure must
     # leave nothing behind
     email = normalise_email(req.email)
@@ -145,6 +181,7 @@ def disable_user(account_id: str, principal: AdminPrincipal = Depends(get_admin_
     if account_id == principal.account.id:
         raise HTTPException(status_code=400, detail="cannot disable your own account")
     def disable(live: Account):
+        _refuse_token_write_to_admin(principal, live)
         live.disabled = True
 
     account = apply_to_account(account_id, disable)
@@ -159,6 +196,7 @@ def disable_user(account_id: str, principal: AdminPrincipal = Depends(get_admin_
 @router.post("/admin/users/{account_id}/enable", response_model=AccountResponse)
 def enable_user(account_id: str, principal: AdminPrincipal = Depends(get_admin_principal)):
     def enable(live: Account):
+        _refuse_token_write_to_admin(principal, live)
         live.disabled = False
 
     account = apply_to_account(account_id, enable)
@@ -179,6 +217,7 @@ def reset_password(
     new_hash = hash_password(req.password)
 
     def set_hash(live: Account):
+        _refuse_token_write_to_admin(principal, live)
         live.password_hash = new_hash
 
     account = apply_to_account(account_id, set_hash)
@@ -228,9 +267,11 @@ def issue_admin_token(
 ):
     """mint a non-interactive administrator credential.
 
-    session only, so a token cannot mint a successor: revoking the tokens an
-    administrator issued is then enough to contain a leak, with no chain to
-    chase. the raw value is in this response and nowhere else, ever.
+    session only, so a token cannot mint a successor here. that alone is not
+    enough: a token able to create an administrator would mint one and log in
+    as it to reach this route, which is why create refuses that. together they
+    mean revoking the tokens an administrator issued contains a leak, with no
+    chain to chase. the raw value is in this response and nowhere else, ever.
     """
     # a bodyless POST is the common case from a shell, so it is not an error
     req = req or AdminTokenRequest()

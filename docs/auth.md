@@ -249,9 +249,9 @@ authenticates to part of the admin API with no password step and no second
 factor.
 
 Issuing one requires a logged-in administrator. There is no unauthenticated or
-bootstrap path to minting one, and a token cannot mint another: containing a
-leak means revoking what an administrator issued, with no chain of successors
-to chase.
+bootstrap path to minting one, and a token cannot mint another, directly or by
+creating an administrator that could: containing a leak means revoking what an
+administrator issued, with no chain of successors to chase.
 
 ```bash
 # log in, keeping the session cookie (a 2FA account redeems its code as usual)
@@ -295,22 +295,52 @@ still applies.
 | Endpoint | Token | Why |
 |-|-|-|
 | `GET /api/admin/users` | yes | Provisioning has to be able to check what already exists |
-| `POST /api/admin/users` | yes | The reason the credential exists |
-| `POST /api/admin/users/{id}/reset-password` | yes | Scripted recovery and rotation |
-| `POST /api/admin/users/{id}/disable`, `/enable` | yes | Deprovisioning is provisioning |
+| `POST /api/admin/users` | yes, never an administrator | The reason the credential exists |
+| `POST /api/admin/users/{id}/reset-password` | yes, not an administrator's | Scripted recovery and rotation |
+| `POST /api/admin/users/{id}/disable`, `/enable` | yes, not an administrator's | Deprovisioning is provisioning |
 | `POST /api/admin/users/{id}/clear-2fa` | no | See below |
 | `GET`, `POST`, `DELETE /api/admin/tokens` | no | A token must not mint or revoke credentials |
 | `GET /api/admin/storage-stats` | no | Not provisioning, and it enumerates every namespace on the instance |
 | Everything else under `/api` | no | A token is not a login |
 
-Clearing a second factor is the one account operation deliberately left out. A
-credential that authenticates without a second factor must not be able to
-remove second factors from accounts: combined with a password reset that would
-make every account on the instance takeable by whoever holds the token,
-including administrators who enrolled 2FA precisely to prevent it. Recovery for
-a lost authenticator stays an interactive act. The split is enforced by which
-dependency each route declares, so a route added later reaches nothing until
-someone opts it in.
+#### Administrator accounts sit outside a token's reach
+
+A token neither creates an administrator nor writes to an account that is one.
+`is_admin: true` on create is `403`, as is a password reset, disable or enable
+whose target is an administrator, the account that issued the token included.
+Ordinary accounts are untouched by the rule: creating, resetting, disabling and
+enabling those is the whole point of the credential. An administrator session
+keeps every one of these abilities.
+
+The refusal is explicit rather than a quiet downgrade to a member account,
+because a provisioning script that asked for an administrator and got a `200`
+would carry on believing it had one.
+
+Without that rule the rest of this table is decoration. A token that can set
+`is_admin` creates an account with no second factor, logs in as it
+interactively, and holds a session: successor tokens, clearing 2FA on anyone,
+storage stats, all of it. A token that can reset an administrator's password
+arrives at the same place in one step fewer. Disable and enable are excluded
+for a weaker reason, denial of service rather than escalation: suspending every
+other administrator leaves the people who could revoke the token unable to log
+in, and the rule is easier to rely on stated once than carved out per route.
+
+Clearing a second factor is left out on the same principle in a different
+shape. A credential that authenticates without a second factor must not be able
+to remove second factors from accounts, which combined with a password reset
+would make every ordinary account on the instance takeable by whoever holds the
+token. Recovery for a lost authenticator stays an interactive act.
+
+Reading is not restricted this way. `GET /api/admin/users` lists every account,
+administrators included. It confers no authority, provisioning needs it to see
+what already exists, and it is how a caller learns which accounts it may not
+write to.
+
+The split is enforced by which dependency each route declares, and the router
+declares the administrator check as its default, so a route added without one
+is authenticated rather than anonymous. Such a route is reachable by a token;
+one that must not be declares the session-only dependency, and both are then
+required for the request to proceed.
 
 A token is not a login. It does not authenticate `GET /api/auth/me`, the
 password or 2FA endpoints, or any session, tool, bin, or project route, and it
