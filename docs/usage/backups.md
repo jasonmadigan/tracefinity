@@ -6,6 +6,9 @@ All Tracefinity state lives in a single storage directory. There is no database,
 
 ```
 storage/
+  users.json                # accounts (hashed credentials, encrypted 2FA secrets)
+  auth_tokens.json          # hashed login tokens
+  auth_secret               # key material for 2FA secrets (unless AUTH_SECRET is set)
   default/                  # user namespace
     sessions.json           # in-progress trace sessions
     tools.json              # saved tool definitions (polygons, metadata)
@@ -18,7 +21,9 @@ storage/
     bins/                   # bin preview images
 ```
 
-Everything is plain JSON and image files. No binary database format.
+Everything is plain JSON and image files. No binary database format. Back up
+the whole directory: restoring user data without `users.json` and
+`auth_secret` loses accounts and stored 2FA secrets.
 
 ## Docker backup
 

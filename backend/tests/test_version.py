@@ -54,7 +54,12 @@ def test_empty_env_vars_fall_back_to_defaults(monkeypatch):
 
 
 def test_openapi_version_hidden_when_disabled(monkeypatch):
-    """reload app with the toggle off; openapi must not carry the version."""
+    """reload app with the toggle off; openapi must not carry the version.
+
+    the schema is no longer served (see test_api_docs_disabled), so assert on
+    the generator behind it: the version must stay out of anything generated
+    from the app, whether or not a route ever exposes it again.
+    """
     import importlib
 
     import app.config as config_mod
@@ -65,8 +70,7 @@ def test_openapi_version_hidden_when_disabled(monkeypatch):
     try:
         importlib.reload(config_mod)
         importlib.reload(main_mod)
-        resp = TestClient(main_mod.app).get("/openapi.json")
-        assert resp.json()["info"]["version"] == "hidden"
+        assert main_mod.app.openapi()["info"]["version"] == "hidden"
     finally:
         monkeypatch.delenv("SHOW_APP_VERSION")
         monkeypatch.delenv("APP_VERSION")

@@ -1,6 +1,6 @@
 # Getting Started
 
-Tracefinity turns photos of tools into 3D-printable gridfinity bins. It runs as a single Docker container with no account or signup required.
+Tracefinity turns photos of tools into 3D-printable gridfinity bins. It runs as a single Docker container with no cloud account or signup required; the first visit creates a local administrator account.
 
 ## Running
 
@@ -8,7 +8,7 @@ Tracefinity turns photos of tools into 3D-printable gridfinity bins. It runs as 
 docker run -p 3000:3000 -v ./data:/app/storage ghcr.io/tracefinity/tracefinity
 ```
 
-Open `http://localhost:3000`. Data persists in the `./data` directory on your host.
+Open `http://localhost:3000`. The first visit asks you to create the administrator account for the installation. Data persists in the `./data` directory on your host.
 
 For cloud-based tracing with Google Gemini (better results, requires an API key):
 
