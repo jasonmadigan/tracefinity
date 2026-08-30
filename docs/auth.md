@@ -133,7 +133,11 @@ is written; a repeated import of the same id and email is a no-op and never
 overwrites. Restoring an account onto storage carried over from the prior
 system also needs `adopt_existing_storage: true`, which is what separates that
 from an id that collides with somebody else's directory by accident; the
-namespace is still refused if an unfinished deletion marked it. Imported bcrypt credentials are verified as-is and transparently
+namespace is still refused if an unfinished deletion marked it. That flag
+needs an administrator session: an admin token asking for it is refused with
+`403`, on the same grounds as creating an administrator, because adopting a
+namespace means reading and writing whatever is already in it. Imported bcrypt
+credentials are verified as-is and transparently
 rehashed to the native scheme on first successful login. The first
 administrator exists before that endpoint can be called, so the command below
 imports the same material for that one account.
@@ -308,7 +312,7 @@ still applies.
 | Endpoint | Token | Why |
 |-|-|-|
 | `GET /api/admin/users` | yes | Provisioning has to be able to check what already exists |
-| `POST /api/admin/users` | yes, never an administrator | The reason the credential exists |
+| `POST /api/admin/users` | yes, never an administrator, never adopting storage | The reason the credential exists |
 | `POST /api/admin/users/{id}/reset-password` | yes, not an administrator's | Scripted recovery and rotation |
 | `POST /api/admin/users/{id}/disable`, `/enable` | yes, not an administrator's | Deprovisioning is provisioning |
 | `POST /api/admin/users/{id}/clear-2fa` | no | See below |
@@ -337,6 +341,26 @@ arrives at the same place in one step fewer. Disable and enable are excluded
 for a weaker reason, denial of service rather than escalation: suspending every
 other administrator leaves the people who could revoke the token unable to log
 in, and the rule is easier to rely on stated once than carved out per route.
+
+#### Occupied storage sits outside a token's reach
+
+A token cannot create an account onto a storage namespace that already holds
+files. `adopt_existing_storage: true` is `403` for a token whatever the
+namespace turns out to contain, so the answer does not depend on the state of
+the volume when the call lands. Creating an account onto an empty or absent
+namespace, which is every ordinary provisioning call, is unaffected.
+
+The account id is the namespace, so a caller that chooses the id chooses the
+directory. Adopting one that is occupied means the new account can read and
+write everything under it, and whoever holds the token can log in as the
+account it just created. Nothing a provisioning script legitimately does needs
+to inherit files already on the volume: the flag is there for an operator
+restoring an account onto storage they are carrying over with it, which is a
+deliberate act on data they are placing there themselves, and an administrator
+session is what performs it.
+
+An unmarked namespace is the case this covers. A marked one, whose owner this
+instance destroyed, is refused for everybody, session and token alike.
 
 Clearing a second factor is left out on the same principle in a different
 shape. A credential that authenticates without a second factor must not be able

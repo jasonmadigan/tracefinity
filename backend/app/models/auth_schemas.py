@@ -85,7 +85,8 @@ class AdminCreateUserRequest(BaseModel):
     created_at: str | None = None
     # import only: open the account onto a storage namespace that already
     # holds files, which is otherwise refused because the id names a
-    # directory that may be another account's
+    # directory that may be another account's. an administrator session only;
+    # an admin token asking for it is refused
     adopt_existing_storage: bool = False
 
 

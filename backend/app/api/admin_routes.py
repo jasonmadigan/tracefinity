@@ -13,11 +13,15 @@ credential that authenticates without a second factor. the router declares
 the first as its default, so a route added without an explicit dependency is
 authenticated rather than anonymous.
 
-across the routes a token does reach, one further rule holds: a token neither
-creates an administrator nor writes to an account that is one. a token
+across the routes a token does reach, two further rules hold: a token neither
+creates an administrator nor writes to an account that is one, and a token
+does not open an account onto storage that already holds files. a token
 authenticates with no password step and no second factor, so an administrator
 it could mint or seize is an interactive login it could take, and every
-containment decision here would fall with it.
+containment decision here would fall with it; and storage it could adopt is
+another party's data it could read and write by logging in as the account it
+just made. both are enforced against the principal, so a route added here
+that takes either from a request body must apply them too.
 
 every mutation logs principal.actor, which names the account and, when a
 token was used, the token.
@@ -81,11 +85,31 @@ def _refuse_token_write_to_admin(principal: AdminPrincipal, live: Account) -> No
     who could revoke the token. checked against the live record inside the
     store lock, so it cannot race a change to the target's admin bit.
     """
-    if principal.token_id is None or not live.is_admin:
+    if not principal.is_token or not live.is_admin:
         return
     raise HTTPException(
         status_code=403,
         detail="an admin token cannot modify an administrator account; "
+        "use an administrator session",
+    )
+
+
+def _refuse_token_storage_adoption(principal: AdminPrincipal) -> None:
+    """stop an admin token opening a new account onto occupied storage.
+
+    adoption exists for an operator restoring an account onto storage carried
+    over with it, which is a deliberate act on data they are placing there. a
+    token is an unattended secret with no password step and no second factor,
+    and nothing it legitimately provisions needs to inherit files already on
+    the volume: whoever holds one could otherwise name any unmarked namespace,
+    create an account onto it and log in as that account to read and write
+    another party's data. a session administrator does the restore instead.
+    """
+    if not principal.is_token:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="an admin token cannot adopt existing storage; "
         "use an administrator session",
     )
 
@@ -100,7 +124,7 @@ def list_users(principal: AdminPrincipal = Depends(get_admin_principal)):
 def create_user(
     req: AdminCreateUserRequest, principal: AdminPrincipal = Depends(get_admin_principal)
 ):
-    if req.is_admin and principal.token_id is not None:
+    if req.is_admin and principal.is_token:
         # refused rather than downgraded: a provisioning script that asked for
         # an administrator must not be told it got one
         raise HTTPException(
@@ -108,6 +132,11 @@ def create_user(
             detail="an admin token cannot create an administrator; "
             "use an administrator session",
         )
+    if req.adopt_existing_storage:
+        # checked on the request field, not on whether the namespace happens
+        # to be occupied, so the refusal does not depend on the state of the
+        # volume at the moment the call lands
+        _refuse_token_storage_adoption(principal)
     # validate everything before touching the store: a partial failure must
     # leave nothing behind
     email = normalise_email(req.email)
