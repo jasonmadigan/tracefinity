@@ -18,7 +18,9 @@ from app.services.auth_token_store import TOKEN_LIFETIME
 from app.services.password_hashing import is_supported_hash
 
 MIN_PASSWORD_LENGTH = 8
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
+# \A and \Z for the same reason as _USER_ID_RE: $ tolerates a trailing
+# newline. normalise_email strips first, so this holds the line regardless
+_EMAIL_RE = re.compile(r"\A[^@\s]+@[^@\s]+\Z")
 # below the 128 bits RFC 4226 requires of a generator: an import comes from
 # whatever the prior system issued, and refusing it strands the account
 _MIN_TOTP_SECRET_BYTES = 10

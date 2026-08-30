@@ -13,8 +13,11 @@ from app.models.accounts import Account
 
 AUTH_COOKIE_NAME = "tracefinity_auth"
 
-# allow cuid (25 alphanumeric) or uuid (36 hex+hyphens); block path traversal
-_USER_ID_RE = re.compile(r"^[a-z0-9]{25}$|^[a-f0-9-]{36}$")
+# allow cuid (25 alphanumeric) or uuid (36 hex+hyphens); block path traversal.
+# \A and \Z, not ^ and $: $ also matches before a trailing newline, so an
+# id ending in one would pass and become a directory name containing it.
+# anchoring the group rather than each branch keeps the two in step
+_USER_ID_RE = re.compile(r"\A(?:[a-z0-9]{25}|[a-f0-9-]{36})\Z")
 
 
 def valid_user_id(raw: str) -> bool:
