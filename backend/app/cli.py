@@ -31,7 +31,7 @@ from app.config import ensure_user_dirs, settings
 from app.models.accounts import Account
 from app.services import namespace_tombstones, secret_box
 from app.services.account_store import get_account_store
-from app.services.namespace_tombstones import NamespaceDeletionPendingError
+from app.services.namespace_tombstones import NamespaceNotClaimableError
 from app.services.password_hashing import hash_password, is_supported_hash
 
 EXIT_OK = 0
@@ -276,8 +276,12 @@ def _create_admin(args: argparse.Namespace) -> int:
             backup_code_hashes=backup_hashes,
         )
         try:
-            namespace_tombstones.claim(account.storage_namespace)
-        except NamespaceDeletionPendingError as exc:
+            # adopting is what this command is for: the default namespace holds
+            # a single-user install's library, and --storage-namespace names
+            # storage the account already owned elsewhere. both are typed by an
+            # operator on an instance with no accounts. a tombstone still refuses
+            namespace_tombstones.claim(account.storage_namespace, adopt_existing=True)
+        except NamespaceNotClaimableError as exc:
             raise CliError(str(exc)) from exc
         if not get_account_store().create_first_admin(account):
             raise CliError("an account was created concurrently; nothing was changed", EXIT_EXISTS)

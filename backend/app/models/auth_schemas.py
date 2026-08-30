@@ -83,6 +83,10 @@ class AdminCreateUserRequest(BaseModel):
     totp_secret: str | None = None  # base32
     backup_code_hashes: list[str] | None = None
     created_at: str | None = None
+    # import only: open the account onto a storage namespace that already
+    # holds files, which is otherwise refused because the id names a
+    # directory that may be another account's
+    adopt_existing_storage: bool = False
 
 
 class AdminResetPasswordRequest(BaseModel):

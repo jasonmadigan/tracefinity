@@ -98,11 +98,19 @@ setup only opens on an empty account store: an instance left with accounts but
 no administrator could not be recovered. Deleting the last remaining account
 is allowed and returns the instance to first run.
 
+A namespace is claimable only when its directory is empty or absent. Creating
+an account onto a namespace that already holds files is refused with `409`,
+because the account would be able to read and write all of them. Remove that
+directory from the storage volume to release the namespace, or see the import
+option below when the files belong to the account being created.
+
 The account record goes before the stored data, so a storage failure part-way
 through can leave files with no owner. Deletion marks the namespace first and
-only unmarks it once the files are gone, and an account creation that would
-claim a marked namespace still holding files is refused with `409`. Remove
-that directory from the storage volume to release the namespace.
+only unmarks it once the files are gone. The marker survives a process that
+dies mid-deletion, which no directory inspection can otherwise explain, and it
+separates files an operator may deliberately claim from files whose owner this
+instance already destroyed: a marked namespace is refused even when the claim
+asks to adopt what is there.
 
 That refusal happens where a namespace is claimed, which is account creation.
 Proxy mode has no accounts: the namespace is whatever `X-User-Id` says, and
@@ -122,7 +130,10 @@ caller-supplied `id` (keeps storage keying), a `password_hash` in bcrypt
 (`$2a$`/`$2b$`/`$2y$`) or native `$scrypt$` form, a base32 `totp_secret`,
 `backup_code_hashes`, and `created_at`. Imports are validated before anything
 is written; a repeated import of the same id and email is a no-op and never
-overwrites. Imported bcrypt credentials are verified as-is and transparently
+overwrites. Restoring an account onto storage carried over from the prior
+system also needs `adopt_existing_storage: true`, which is what separates that
+from an id that collides with somebody else's directory by accident; the
+namespace is still refused if an unfinished deletion marked it. Imported bcrypt credentials are verified as-is and transparently
 rehashed to the native scheme on first successful login. The first
 administrator exists before that endpoint can be called, so the command below
 imports the same material for that one account.
@@ -199,8 +210,10 @@ authenticated use wants.
 
 The value becomes a directory name under the storage root, so it is held to
 the same format contract as `--id`, plus the literal `default`. Anything else
-is rejected. Whichever namespace is chosen, it is claimed on the same terms:
-a namespace whose deletion did not finish is refused.
+is rejected. Naming a namespace here is a deliberate claim on whatever it
+holds, which is what the option is for, so unlike `/api/admin/users` the
+command does not refuse a namespace that already has files in it. A namespace
+whose deletion did not finish is still refused.
 
 `--totp-secret` imports a second factor on the same terms as the admin create
 endpoint, through the same validation and the same encryption at rest, so the

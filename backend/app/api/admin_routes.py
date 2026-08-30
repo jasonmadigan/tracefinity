@@ -62,7 +62,7 @@ from app.services import namespace_tombstones, secret_box
 from app.services.account_store import DuplicateAccountError, get_account_store
 from app.services.auth_token_store import get_auth_token_store
 from app.services.login_rate_limit import login_limiter
-from app.services.namespace_tombstones import NamespaceDeletionPendingError
+from app.services.namespace_tombstones import NamespaceNotClaimableError
 from app.services.password_hashing import hash_password, is_supported_hash
 
 logger = logging.getLogger(__name__)
@@ -164,8 +164,14 @@ def create_user(
         backup_code_hashes=backup_hashes,
     )
     try:
-        namespace_tombstones.claim(account.storage_namespace)
-    except NamespaceDeletionPendingError as exc:
+        # the namespace is the account id, so a supplied id can land on a
+        # directory that already holds another account's files. refuse unless
+        # the caller is importing an account back onto storage it owns and
+        # says so
+        namespace_tombstones.claim(
+            account.storage_namespace, adopt_existing=req.adopt_existing_storage
+        )
+    except NamespaceNotClaimableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
         store.create(account)
