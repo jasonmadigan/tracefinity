@@ -1,19 +1,21 @@
 """account records in users.json at the storage root.
 
-same atomic mkstemp+replace pattern as the per-user stores. accounts are
-instance-level data, so the store lives beside (not inside) user dirs.
+same atomic write as the per-user stores, plus the fsyncs that make it
+durable: this is the credential store, and losing it hands the instance to
+whoever reaches first-run setup next. accounts are instance-level data, so
+the store lives beside (not inside) user dirs.
 """
 from __future__ import annotations
 
 import json
 import logging
-import tempfile
 import threading
 from pathlib import Path
 from typing import Callable, Optional
 
 from app.config import settings
 from app.models.accounts import Account
+from app.services.durable_write import write_json_atomically
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +53,7 @@ class AccountStore:
     def _save(self):
         # runs with self._lock held
         data = {account_id: a.model_dump() for account_id, a in self._accounts.items()}
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=self.file_path.parent, prefix=".users_", suffix=".tmp"
-        )
-        try:
-            with open(temp_fd, "w") as f:
-                json.dump(data, f, indent=2)
-            Path(temp_path).replace(self.file_path)
-        except Exception:
-            Path(temp_path).unlink(missing_ok=True)
-            raise
+        write_json_atomically(self.file_path, data, prefix=".users_")
 
     @staticmethod
     def _has_enabled_admin(accounts) -> bool:

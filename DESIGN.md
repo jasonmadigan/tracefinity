@@ -19,6 +19,11 @@ increasing upwards. Negate Y whenever data crosses that boundary. See
   Defaults must not silently replace a choice the user already saved.
 - Operations that replace user data must be atomic. Build the replacement first,
   then swap it in; partial failure must not destroy the previous state.
+- Atomic is not durable. A rename can reach the directory entry while the
+  contents are still in the page cache, so credential and identity material must
+  be flushed to disk before the rename and the containing directory flushed
+  after it. `app/services/durable_write.py` does both; a platform that cannot
+  flush a directory degrades rather than failing the write.
 - Do not turn corrupt persistent data into an empty store and then overwrite the
   evidence. Preserve the original and surface a useful error or recovery path.
 - Clean up files created by failed operations. Check failure paths as carefully

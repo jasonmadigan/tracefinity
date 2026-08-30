@@ -20,7 +20,6 @@ import hmac
 import json
 import logging
 import secrets
-import tempfile
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -29,6 +28,7 @@ from typing import Callable, Optional
 from pydantic import BaseModel
 
 from app.config import settings
+from app.services.durable_write import write_json_atomically
 
 logger = logging.getLogger(__name__)
 
@@ -84,16 +84,7 @@ class AuthTokenStore:
     def _save(self):
         # runs with self._lock held
         data = {h: r.model_dump() for h, r in self._tokens.items()}
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=self.file_path.parent, prefix=".auth_tokens_", suffix=".tmp"
-        )
-        try:
-            with open(temp_fd, "w") as f:
-                json.dump(data, f, indent=2)
-            Path(temp_path).replace(self.file_path)
-        except Exception:
-            Path(temp_path).unlink(missing_ok=True)
-            raise
+        write_json_atomically(self.file_path, data, prefix=".auth_tokens_")
 
     def _purge_expired_locked(self):
         now = self._now()
