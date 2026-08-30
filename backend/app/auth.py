@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import re
+from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import HTTPException
@@ -12,8 +13,11 @@ from app.models.accounts import Account
 
 AUTH_COOKIE_NAME = "tracefinity_auth"
 
-# allow cuid (25 alphanumeric) or uuid (36 hex+hyphens); block path traversal
-_USER_ID_RE = re.compile(r"^[a-z0-9]{25}$|^[a-f0-9-]{36}$")
+# allow cuid (25 alphanumeric) or uuid (36 hex+hyphens); block path traversal.
+# \A and \Z, not ^ and $: $ also matches before a trailing newline, so an
+# id ending in one would pass and become a directory name containing it.
+# anchoring the group rather than each branch keeps the two in step
+_USER_ID_RE = re.compile(r"\A(?:[a-z0-9]{25}|[a-f0-9-]{36})\Z")
 
 
 def valid_user_id(raw: str) -> bool:
@@ -73,6 +77,77 @@ async def get_admin_account(request: Request) -> Account:
     if not account.is_admin:
         raise HTTPException(status_code=403, detail="administrator access required")
     return account
+
+
+@dataclass(frozen=True)
+class AdminPrincipal:
+    """who is acting on the admin API, and with what.
+
+    token_id is set only when an admin token authenticated the request, so
+    every mutation can name the credential rather than just the account.
+    """
+
+    account: Account
+    token_id: str | None = None
+
+    @property
+    def actor(self) -> str:
+        if self.token_id:
+            return f"{self.account.id} via token {self.token_id}"
+        return self.account.id
+
+
+def _bearer_token(request: Request) -> Optional[str]:
+    """the Bearer credential on the request, if it carries one.
+
+    another scheme (a fronting proxy's own basic auth) is ignored rather than
+    refused: it grants nothing here, and rejecting it would lock an operator
+    out of a session that was working.
+    """
+    header = request.headers.get("authorization")
+    if not header:
+        return None
+    scheme, _, value = header.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return value.strip() or None
+
+
+async def get_admin_principal(request: Request) -> AdminPrincipal:
+    """administrator for the request: an admin token, else the login cookie.
+
+    a Bearer credential that fails is a refusal, never a fall-through to the
+    cookie: an explicitly presented credential decides the request.
+    """
+    if settings.resolved_auth_mode != "native":
+        raise HTTPException(status_code=404, detail="native authentication is not enabled")
+    raw = _bearer_token(request)
+    if raw is None:
+        return AdminPrincipal(account=await get_admin_account(request))
+
+    from app.services.account_store import get_account_store
+    from app.services.auth_token_store import get_auth_token_store
+
+    resolved = get_auth_token_store().resolve_admin_token(raw)
+    if resolved is None:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    account_id, token_id = resolved
+    account = get_account_store().get(account_id)
+    # the token carries no authority its issuer has lost: a disabled or
+    # demoted account takes its tokens down with it, checked live so it
+    # applies however the account changed
+    if account is None or account.disabled or not account.is_admin:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    return AdminPrincipal(account=account, token_id=token_id)
+
+
+async def get_admin_session_principal(request: Request) -> AdminPrincipal:
+    """administrator from an interactive login only.
+
+    guards what a credential that skips the second factor must not reach. a
+    Bearer token here simply is not a login, so the cookie check refuses it.
+    """
+    return AdminPrincipal(account=await get_admin_account(request))
 
 
 async def require_instance_admin(request: Request):

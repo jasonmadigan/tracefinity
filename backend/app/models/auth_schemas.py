@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# an upper bound on a requested lifetime, so a typo cannot mint a
+# ten-thousand-year credential that reads as deliberate
+MAX_ADMIN_TOKEN_DAYS = 3650
 
 
 class AuthStatusResponse(BaseModel):
@@ -74,6 +78,7 @@ class AdminCreateUserRequest(BaseModel):
     # import path: verify-as-is bcrypt ($2a/$2b/$2y) or native $scrypt$
     password_hash: str | None = None
     id: str | None = None
+    # session only: an admin token is refused rather than downgraded
     is_admin: bool = False
     totp_secret: str | None = None  # base32
     backup_code_hashes: list[str] | None = None
@@ -86,3 +91,28 @@ class AdminResetPasswordRequest(BaseModel):
 
 class AdminUserListResponse(BaseModel):
     users: list[AccountResponse]
+
+
+class AdminTokenRequest(BaseModel):
+    # free-text note so an operator can tell one credential from another
+    label: str = Field(default="", max_length=100)
+    # omitted means no expiry; see docs/auth.md for why that is the default
+    expires_in_days: int | None = Field(default=None, gt=0, le=MAX_ADMIN_TOKEN_DAYS)
+
+
+class AdminTokenResponse(BaseModel):
+    id: str
+    account_id: str
+    label: str
+    created_at: str
+    expires_at: str | None
+    last_used_at: str | None
+
+
+class AdminTokenIssuedResponse(AdminTokenResponse):
+    # the raw credential, returned by the issuing call and never again
+    token: str
+
+
+class AdminTokenListResponse(BaseModel):
+    tokens: list[AdminTokenResponse]

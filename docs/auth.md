@@ -59,8 +59,9 @@ command below.
 | `AUTH_ALLOW_ACCOUNT_DATA_WITHOUT_LOGIN` | `false` | Permit `open` or `proxy` mode on an instance that already has native accounts. Refused by default (see below) |
 
 The auth cookie (`tracefinity_auth`) is HttpOnly, SameSite=Lax, with a 14-day
-sliding lifetime. Tokens are stored hashed in `{storage}/auth_tokens.json`;
-accounts live in `{storage}/users.json`. Back up both with your storage volume.
+sliding lifetime. Tokens are stored hashed in `{storage}/auth_tokens.json`,
+which also holds the administrator API tokens described below; accounts live in
+`{storage}/users.json`. Back up both with your storage volume.
 
 When serving the frontend from a different origin than the backend, set
 `CORS_ORIGINS` to the real frontend origin. Credentials are only sent to
@@ -80,6 +81,8 @@ The first account is the administrator. `/api/admin/users` covers the minimum
 management surface: list, create, disable and enable (disabling revokes the
 account's auth tokens immediately), reset password, and clear 2FA. Every
 account can change its own password; a password change logs out other devices.
+`/api/admin/tokens` issues and revokes the non-interactive credential described
+under [Administrator API tokens](#administrator-api-tokens).
 
 Disabling refuses with `409` when it would leave the instance with no enabled
 administrator. The check runs inside the account store under its lock, not in
@@ -234,6 +237,183 @@ over, set the variable for the one command: `docker exec -e AUTH_MODE=native
 
 Errors go to stderr. Neither the password, the stored hash, nor an imported
 TOTP secret is ever printed.
+
+## Administrator API tokens
+
+The first-run command above covers provisioning before anyone can log in.
+Ongoing administration has the same problem in a different place: a deployment
+that creates accounts from its own front end, an internal tool, or a
+provisioning script cannot drive a browser login, and cannot supply a second
+factor at all. An administrator API token is the credential for that. It
+authenticates to part of the admin API with no password step and no second
+factor.
+
+Issuing one requires a logged-in administrator. There is no unauthenticated or
+bootstrap path to minting one, and a token cannot mint another, directly or by
+creating an administrator that could: containing a leak means revoking what an
+administrator issued, with no chain of successors to chase.
+
+```bash
+# log in, keeping the session cookie (a 2FA account redeems its code as usual)
+curl -sc cookies.txt -X POST http://localhost:8000/api/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"you@example.com","password":"..."}'
+
+# issue the token; the raw value is in this response and nowhere else
+curl -sb cookies.txt -X POST http://localhost:8000/api/admin/tokens \
+  -H 'content-type: application/json' \
+  -d '{"label":"provisioner"}'
+```
+
+The response carries `token` once. It is stored only as a sha256 hash in
+`{storage}/auth_tokens.json`, alongside login tokens, so nothing can print it
+again: a lost token is revoked and reissued, not recovered. It never appears
+in a log line, an error, or any later response. Values carry a `tfadm_` prefix
+so a leaked one is recognisable in a repository or a CI log.
+
+Present it as a bearer credential:
+
+```bash
+curl -X POST http://localhost:8000/api/admin/users \
+  -H "Authorization: Bearer $TRACEFINITY_ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"email":"new@example.com","password":"a new password"}'
+```
+
+`Authorization` is used rather than a bespoke header because every HTTP client
+already handles it, and because a browser never attaches it on its own, so a
+token cannot become an ambient credential the way a cookie is. It does not
+collide with `X-Proxy-Secret`, which authenticates a proxy rather than a
+person, or with the auth cookie. A request carrying a bearer
+token is decided by that token: an invalid one is `401` and never falls back
+to a cookie that happens to be present. An `Authorization` header in another
+scheme, such as a fronting proxy's own basic auth, is ignored and the cookie
+still applies.
+
+### What a token reaches
+
+| Endpoint | Token | Why |
+|-|-|-|
+| `GET /api/admin/users` | yes | Provisioning has to be able to check what already exists |
+| `POST /api/admin/users` | yes, never an administrator | The reason the credential exists |
+| `POST /api/admin/users/{id}/reset-password` | yes, not an administrator's | Scripted recovery and rotation |
+| `POST /api/admin/users/{id}/disable`, `/enable` | yes, not an administrator's | Deprovisioning is provisioning |
+| `POST /api/admin/users/{id}/clear-2fa` | no | See below |
+| `GET`, `POST`, `DELETE /api/admin/tokens` | no | A token must not mint or revoke credentials |
+| `GET /api/admin/storage-stats` | no | Not provisioning, and it enumerates every namespace on the instance |
+| Everything else under `/api` | no | A token is not a login |
+
+#### Administrator accounts sit outside a token's reach
+
+A token neither creates an administrator nor writes to an account that is one.
+`is_admin: true` on create is `403`, as is a password reset, disable or enable
+whose target is an administrator, the account that issued the token included.
+Ordinary accounts are untouched by the rule: creating, resetting, disabling and
+enabling those is the whole point of the credential. An administrator session
+keeps every one of these abilities.
+
+The refusal is explicit rather than a quiet downgrade to a member account,
+because a provisioning script that asked for an administrator and got a `200`
+would carry on believing it had one.
+
+Without that rule the rest of this table is decoration. A token that can set
+`is_admin` creates an account with no second factor, logs in as it
+interactively, and holds a session: successor tokens, clearing 2FA on anyone,
+storage stats, all of it. A token that can reset an administrator's password
+arrives at the same place in one step fewer. Disable and enable are excluded
+for a weaker reason, denial of service rather than escalation: suspending every
+other administrator leaves the people who could revoke the token unable to log
+in, and the rule is easier to rely on stated once than carved out per route.
+
+Clearing a second factor is left out on the same principle in a different
+shape. A credential that authenticates without a second factor must not be able
+to remove second factors from accounts, which combined with a password reset
+would make every ordinary account on the instance takeable by whoever holds the
+token. Recovery for a lost authenticator stays an interactive act.
+
+Reading is not restricted this way. `GET /api/admin/users` lists every account,
+administrators included. It confers no authority, provisioning needs it to see
+what already exists, and it is how a caller learns which accounts it may not
+write to.
+
+The split is enforced by which dependency each route declares, and the router
+declares the administrator check as its default, so a route added without one
+is authenticated rather than anonymous. Such a route is reachable by a token;
+one that must not be declares the session-only dependency, and both are then
+required for the request to proceed.
+
+A token is not a login. It does not authenticate `GET /api/auth/me`, the
+password or 2FA endpoints, or any session, tool, bin, or project route, and it
+cannot be pasted into the auth cookie: the two kinds of token are stored
+together but resolved separately, and neither resolver accepts the other's.
+
+### Revoking
+
+```bash
+curl -sb cookies.txt http://localhost:8000/api/admin/tokens
+curl -sb cookies.txt -X DELETE http://localhost:8000/api/admin/tokens/<id>
+```
+
+Revocation takes effect on the next request. The listing is instance-wide, not
+per administrator, so whoever is dealing with a leak can see and revoke a
+credential another administrator issued. It reports the issuing account, the
+label, when the token was created and last used, and its expiry, never the
+token itself.
+
+Revoking a token does not log its issuer out, and logging out does not revoke
+the token. A password change, whether self-service or an administrator reset,
+revokes login tokens and leaves administrator API tokens alone: rotating a
+password is not evidence that a provisioning credential leaked, and quietly
+breaking automation on every rotation would teach operators not to rotate.
+Revoke a token explicitly when it needs to go.
+
+Disabling the issuing account makes its tokens inert immediately, because every
+one of them is checked against the live account on use. Enabling the account
+restores them: a disable is a suspension, not a revocation. Demoting the
+account out of `is_admin` has the same effect. Deleting the account destroys
+its tokens outright.
+
+### Expiry
+
+There is no expiry by default. Provisioning automation runs for as long as the
+deployment does, and a credential that silently stops working is a credential
+that fails in the middle of something. Pass `expires_in_days` at issue time
+when a bounded one is wanted:
+
+```bash
+curl -sb cookies.txt -X POST http://localhost:8000/api/admin/tokens \
+  -H 'content-type: application/json' \
+  -d '{"label":"migration", "expires_in_days": 7}'
+```
+
+Unlike the login cookie, an administrator API token never slides: using it
+does not push its deadline out, so a bounded credential stays bounded.
+
+Nothing needs configuring to use any of this, and there is no rate limit on
+token authentication. The credential is 256 bits of `secrets.token_urlsafe`
+compared against stored hashes in constant time with no oracle to work
+against, so guessing one is not an attack that a limit would help with, and a
+limit keyed on anything a caller controls would hand an attacker a way to lock
+out an operator's automation. Password login stays rate limited because
+passwords are not 256 bits of randomness.
+
+Tokens exist in `native` mode only. In `open` and `proxy` mode the whole
+`/api/admin/users` surface returns `404` as it always has, bearer credential or
+not, so nothing here extends `PROXY_SECRET` or has to be unwound when `proxy`
+mode goes.
+
+### Attribution
+
+Every administrative mutation is logged with the account that made it and, when
+a token was used, the token:
+
+```
+admin 3f2a... created account 9b1c...
+admin 3f2a... via token 7d41... created account 9b1c...
+```
+
+Account creation, disable, enable, password reset and clearing 2FA all record
+this, as do issuing and revoking tokens.
 
 ## What stays public in native mode
 

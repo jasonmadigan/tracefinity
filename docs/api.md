@@ -38,7 +38,20 @@ pending token is still good.
 - `POST /api/admin/users/{id}/disable` - disable and revoke the account's tokens immediately
 - `POST /api/admin/users/{id}/enable` - re-enable
 - `POST /api/admin/users/{id}/reset-password` - set a new password, revoking tokens
-- `POST /api/admin/users/{id}/clear-2fa` - recovery for a lost authenticator
+- `POST /api/admin/users/{id}/clear-2fa` - recovery for a lost authenticator; administrator session only
+- `GET /api/admin/tokens` - list administrator API tokens; administrator session only
+- `POST /api/admin/tokens` - issue one, returning the raw value once; administrator session only
+- `DELETE /api/admin/tokens/{id}` - revoke one; administrator session only
+
+Administrator API tokens authenticate the user-management endpoints above with
+`Authorization: Bearer <token>`, without a password or second factor. They do
+not reach `clear-2fa`, the token endpoints themselves, `storage-stats`, or
+anything outside `/api/admin/users`.
+
+Within those endpoints a token cannot create an administrator (`is_admin: true`
+is `403`) or write to an account that is one, so create, disable, enable and
+reset-password apply to ordinary accounts only. Listing is unrestricted. An
+administrator session keeps all of it. See [auth.md](auth.md).
 
 ## Sessions (trace workflow)
 - `POST /api/upload` - upload image, auto-detect corners
