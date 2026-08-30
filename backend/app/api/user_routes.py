@@ -31,7 +31,9 @@ def _delete_native_account(request: Request) -> bool:
         get_account_store().delete(account.id)
     except LastAdminError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    get_auth_token_store().revoke_for_account(account.id)
+    # everything, admin tokens included: the account is gone, so nothing
+    # issued under it may outlive it
+    get_auth_token_store().revoke_all_for_account(account.id)
     logger.info("deleted account %s", account.id)
     return True
 
