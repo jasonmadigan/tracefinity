@@ -20,7 +20,7 @@ from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
 
-from app.auth import get_user_id
+from app.auth import get_user_id, require_instance_admin
 from app.config import ensure_user_dirs, settings
 from app.constants import GF_GRID, MAX_BIN_GRID_CELLS, MAX_BIN_GRID_UNITS
 from app.models.schemas import (
@@ -1128,8 +1128,13 @@ async def get_version():
 
 
 @router.get("/api-keys")
-async def get_available_keys(request: Request):
-    """return available tracers and provider info."""
+async def get_available_keys(user_id: str = Depends(get_user_id)):
+    """return available tracers and provider info.
+
+    identity is resolved per mode like every other data route: this reports
+    instance configuration, including whether cloud keys are set, so native
+    mode must not hand it to an unauthenticated caller.
+    """
     tracers = settings.available_tracers
     has_cloud = bool(settings.google_api_key) or bool(settings.openrouter_api_key)
     has_saliency = settings.primary_is_saliency
@@ -2304,10 +2309,6 @@ def _storage_stats_snapshot(storage: Path) -> dict:
         return result
 
 
-@router.get("/admin/storage-stats")
-def storage_stats(request: Request):
-    if settings.proxy_secret:
-        if request.headers.get("x-proxy-secret") != settings.proxy_secret:
-            raise HTTPException(status_code=403)
-
+@router.get("/admin/storage-stats", dependencies=[Depends(require_instance_admin)])
+def storage_stats():
     return _storage_stats_snapshot(settings.storage_path)

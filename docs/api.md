@@ -1,12 +1,44 @@
 # API Endpoints
 
-## User namespaces
+## Authentication
 
-Standalone installations do not need authentication headers and store data in
-the `default` namespace. Multi-user reverse proxies can set `X-User-Id` only
-when the backend has `PROXY_SECRET` configured and the request includes the
-matching value in `X-Proxy-Secret`. API and storage requests that try to select
-a user namespace without a configured proxy secret receive `403 Forbidden`.
+Identity depends on `AUTH_MODE` (see [auth.md](auth.md)). In `native` mode
+(default), the `tracefinity_auth` cookie authenticates API and `/storage`
+requests; unauthenticated requests receive `401`. In `proxy` mode a trusted
+reverse proxy sets `X-User-Id` with the matching `X-Proxy-Secret`; requests
+without the header receive `401`. In `open` mode requests fall back to the
+`default` namespace. Requests carrying `X-User-Id` when it is not trusted
+receive `403 Forbidden`.
+
+### Auth endpoints (native mode)
+
+- `GET /api/auth/status` - `{mode, setup_required, authenticated}`; available in every mode
+- `POST /api/auth/setup` - create the first administrator; `409` once setup is done
+- `POST /api/auth/login` - password login; 2FA accounts get `{pending: true, pending_token}` instead of a cookie
+- `POST /api/auth/login/2fa` - redeem a pending token with a TOTP or backup code
+- `POST /api/auth/logout` - revoke the auth token and clear the cookie
+- `GET /api/auth/me` - the authenticated account
+- `POST /api/auth/password` - self-service password change (requires the current password)
+- `POST /api/auth/2fa/enroll` - start TOTP enrolment; returns the secret and otpauth URI
+- `POST /api/auth/2fa/confirm` - confirm with a first valid code; enables 2FA and returns backup codes
+- `POST /api/auth/2fa/backup-codes` - regenerate backup codes (password + current code)
+- `POST /api/auth/2fa/disable` - disable 2FA (password + current code)
+
+Two-step login errors carry a machine-readable code so a client can tell them
+apart without matching on wording: `detail` is
+`{"code": ..., "message": ...}` instead of a plain string.
+`pending_login_invalid` means the pending token is spent and the login must
+restart; `two_factor_code_invalid` means only the code was wrong and the
+pending token is still good.
+
+### Admin endpoints (native mode)
+
+- `GET /api/admin/users` - list accounts
+- `POST /api/admin/users` - create an account; supports credential import (see [auth.md](auth.md))
+- `POST /api/admin/users/{id}/disable` - disable and revoke the account's tokens immediately
+- `POST /api/admin/users/{id}/enable` - re-enable
+- `POST /api/admin/users/{id}/reset-password` - set a new password, revoking tokens
+- `POST /api/admin/users/{id}/clear-2fa` - recovery for a lost authenticator
 
 ## Sessions (trace workflow)
 - `POST /api/upload` - upload image, auto-detect corners

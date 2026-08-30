@@ -311,3 +311,39 @@ export interface BinSummary {
   grid_y: number
   preview_tools: BinPreviewTool[]
 }
+
+export interface AuthStatus {
+  mode: 'native' | 'proxy' | 'open'
+  setup_required: boolean
+  authenticated: boolean
+}
+
+export interface Account {
+  id: string
+  email: string
+  is_admin: boolean
+  disabled: boolean
+  created_at: string
+  totp_enabled: boolean
+}
+
+export interface LoginResult {
+  pending: boolean
+  pending_token: string | null
+  account: Account | null
+}
+
+export interface TwoFactorEnrolment {
+  secret: string
+  otpauth_uri: string
+}
+
+export interface BackupCodes {
+  backup_codes: string[]
+}
+
+export interface CreateUserRequest {
+  email: string
+  password: string
+  is_admin?: boolean
+}

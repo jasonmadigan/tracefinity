@@ -16,7 +16,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: '. ../backend/venv/bin/activate && E2E_TEST_MODE=1 DEVELOPMENT_MODE=1 GOOGLE_API_KEY=mock uvicorn app.main:app --port 8000',
+      command: '. ../backend/venv/bin/activate && E2E_TEST_MODE=1 DEVELOPMENT_MODE=1 AUTH_MODE=open GOOGLE_API_KEY=mock uvicorn app.main:app --port 8000',
       cwd: '../backend',
       port: 8000,
       reuseExistingServer: !process.env.CI,

@@ -55,6 +55,10 @@ The Docker image supports **linux/amd64** and **linux/arm64**. Apple Silicon Mac
 
 Open http://localhost:3000
 
+The first visit prompts you to create an administrator account; any data from
+an earlier version is claimed by that account, untouched on disk. See
+[Authentication](docs/auth.md) for modes, 2FA, and recovery.
+
 By default, Tracefinity uses [IS-Net](https://github.com/xuebinqin/DIS) for local tracing -- no API key needed. Set `GOOGLE_API_KEY` to use Gemini instead. See [Tracing Modes](#tracing-modes) for RAM requirements per model.
 
 | Variable | Default | Description |
@@ -69,7 +73,11 @@ By default, Tracefinity uses [IS-Net](https://github.com/xuebinqin/DIS) for loca
 | `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image-preview` | Gemini model for mask generation (see below) |
 | `TOOL_LABEL_PROVIDER` | `none` | Optional automatic tool naming. Set to `ollama` for local vision naming |
 | `SHOW_APP_VERSION` | `true` | Show the running version in the settings popover. Set to `false` to hide it |
-| `PROXY_SECRET` | | Shared secret for a trusted multi-user reverse proxy. Leave unset for normal standalone use |
+| `AUTH_MODE` | `native` | Authentication mode: `native` (cookie login), `proxy` (trusted reverse proxy, deprecated), or `open` (no authentication, trusted networks only). See [Authentication](docs/auth.md) |
+| `AUTH_SECRET` | auto-generated | Encrypts 2FA secrets at rest. Auto-generated into the storage volume when unset |
+| `AUTH_COOKIE_SECURE` | `false` | Mark the auth cookie `Secure`. Set `true` behind TLS |
+| `AUTH_COOKIE_DOMAIN` | host-only | Auth cookie domain for subdomain topologies |
+| `PROXY_SECRET` | | Shared secret for a trusted multi-user reverse proxy (`proxy` mode). Leave unset for normal standalone use |
 
 ### Docker Compose
 
@@ -257,6 +265,7 @@ Step-by-step usage guides covering each part of the workflow:
 - [Automatic tool naming](docs/tool-naming.md)
 - [Keyboard shortcuts](docs/usage/keyboard-shortcuts.md)
 - [Backup and restore](docs/usage/backups.md)
+- [Authentication](docs/auth.md)
 
 ## What is Gridfinity?
 
