@@ -60,6 +60,10 @@ export const navigation = {
   toHome() {
     window.location.assign('/')
   },
+  // destination has already been checked by the login server page
+  afterLogin(destination: string) {
+    window.location.assign(destination)
+  },
 }
 
 function redirectToLogin() {

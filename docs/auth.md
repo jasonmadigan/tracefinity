@@ -75,6 +75,22 @@ that encrypts every stored 2FA secret, and it overrides the generated file
 secret, so a short value makes `users.json` worth brute-forcing offline.
 Leaving it unset generates a strong one into the storage volume.
 
+### Returning after login
+
+An integration can open `/login?returnTo=<encoded-absolute-url>` to resume a
+page after login. The frontend server checks the destination against
+`AUTH_LOGIN_RETURN_ORIGINS`, a JSON array of exact origins, for example
+`["https://portal.example.com"]`. Set it in the frontend process environment
+(or the combined container environment). It is read at request time, so changing
+the list does not require rebuilding the frontend.
+
+The list defaults to empty. Missing, malformed, or unapproved destinations
+return to `/` as before. Entries must be HTTP or HTTPS origins without paths,
+queries, credentials, or a trailing slash; scheme and port must match exactly.
+Wildcards and relative destinations are not supported. The destination's path
+and query are preserved through password login, two-factor login, and an already
+authenticated visit. A first-run instance still opens `/setup`.
+
 ## Accounts and administration
 
 The first account is the administrator. `/api/admin/users` covers the minimum
