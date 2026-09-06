@@ -356,7 +356,6 @@ def _build_shelled_base(config: GenerateRequest):
     usual); the trench floor plate above them seals the bottom. The
     full-hollow option was removed from the product.
     """
-    import manifold3d as mf
 
     half_grid = getattr(config, "half_grid_base", False)
     cell_size = GF_HALF_GRID if half_grid else GF_GRID

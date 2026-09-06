@@ -8,6 +8,7 @@ httpx>=0.27.0
 shapely>=2.0.7
 manifold3d>=3.0.0
 trimesh>=4.0.0
+rtree>=1.3.0  # trimesh optional dep: mesh.section polygons_full / ray casting in tests
 lxml>=4.0.0
 pydantic>=2.6.0
 pydantic-settings>=2.1.0
