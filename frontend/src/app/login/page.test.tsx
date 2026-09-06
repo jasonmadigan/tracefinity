@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import LoginPage from './page'
+import LoginPage from './login-form'
+import ServerLoginPage from './page'
 import { ApiError } from '@/lib/api'
 
 // jsdom has no matchMedia; useTheme (via Alert) needs it during init
@@ -26,23 +27,24 @@ vi.mock('@/lib/api', async () => {
     }),
     login: vi.fn(),
     loginTwoFactor: vi.fn(),
-    navigation: { toLogin: vi.fn(), toHome: vi.fn() },
+    navigation: { toLogin: vi.fn(), toHome: vi.fn(), afterLogin: vi.fn() },
   }
 })
 
-import { login, loginTwoFactor, navigation } from '@/lib/api'
+import { getAuthStatus, login, loginTwoFactor, navigation } from '@/lib/api'
 
 const loginMock = vi.mocked(login)
 const loginTwoFactorMock = vi.mocked(loginTwoFactor)
-const toHomeMock = vi.mocked(navigation.toHome)
+const toHomeMock = vi.mocked(navigation.afterLogin)
 
 beforeEach(() => {
   loginMock.mockReset()
   loginTwoFactorMock.mockReset()
   toHomeMock.mockReset()
+  vi.mocked(getAuthStatus).mockResolvedValue({ mode: 'native', setup_required: false, authenticated: false })
 })
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 function submitCredentials(email: string, password: string) {
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: email } })
@@ -51,11 +53,58 @@ function submitCredentials(email: string, password: string) {
 }
 
 describe('LoginPage', () => {
+  const destination = 'https://portal.example.test/projects?view=recent'
+
+  async function returnPage(returnTo: string | string[] = destination) {
+    vi.stubEnv('AUTH_LOGIN_RETURN_ORIGINS', '["https://portal.example.test"]')
+    return ServerLoginPage({ searchParams: Promise.resolve({ returnTo }) })
+  }
+
+  it('returns to the server-approved destination after password login', async () => {
+    loginMock.mockResolvedValue({ pending: false, pending_token: null, account: null })
+    render(await returnPage())
+    submitCredentials('admin@example.com', 'password')
+    await waitFor(() => expect(toHomeMock).toHaveBeenCalledWith(destination))
+  })
+
+  it('preserves the approved destination through the second factor', async () => {
+    loginMock.mockResolvedValue({ pending: true, pending_token: 'tok-return', account: null })
+    loginTwoFactorMock.mockResolvedValue({ pending: false, pending_token: null, account: null })
+    render(await returnPage())
+    submitCredentials('admin@example.com', 'password')
+    fireEvent.change(await screen.findByLabelText('Two-factor code'), { target: { value: '123456' } })
+    expect(toHomeMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Verify' }))
+    await waitFor(() => expect(toHomeMock).toHaveBeenCalledWith(destination))
+  })
+
+  it('returns an already authenticated visitor without asking for credentials', async () => {
+    vi.mocked(getAuthStatus).mockResolvedValue({ mode: 'native', setup_required: false, authenticated: true })
+    render(await returnPage())
+    await waitFor(() => expect(toHomeMock).toHaveBeenCalledWith(destination))
+    expect(loginMock).not.toHaveBeenCalled()
+  })
+
+  it.each(['https://other.example.test/', ['https://portal.example.test/projects', 'https://other.example.test/']])('falls back to home when the server rejects the requested destination', async (returnTo) => {
+    loginMock.mockResolvedValue({ pending: false, pending_token: null, account: null })
+    render(await returnPage(returnTo))
+    submitCredentials('admin@example.com', 'password')
+    await waitFor(() => expect(toHomeMock).toHaveBeenCalledWith('/'))
+  })
+
+  it('reads the origin configuration for each request', async () => {
+    const allowed = await returnPage()
+    expect(allowed.props.returnTo).toBe(destination)
+    vi.stubEnv('AUTH_LOGIN_RETURN_ORIGINS', '[]')
+    const denied = await ServerLoginPage({ searchParams: Promise.resolve({ returnTo: destination }) })
+    expect(denied.props.returnTo).toBe('/')
+  })
+
   it('logs straight in for accounts without 2FA', async () => {
     loginMock.mockResolvedValue({ pending: false, pending_token: null, account: null })
     render(<LoginPage />)
     submitCredentials('admin@example.com', 'password')
-    await waitFor(() => expect(toHomeMock).toHaveBeenCalled())
+    await waitFor(() => expect(toHomeMock).toHaveBeenCalledWith('/'))
     expect(loginMock).toHaveBeenCalledWith('admin@example.com', 'password')
   })
 
