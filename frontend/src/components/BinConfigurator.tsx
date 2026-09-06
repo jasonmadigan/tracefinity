@@ -48,8 +48,8 @@ function HelpTip({ text }: { text: string }) {
 
 function Toggle({ checked, onChange, label, help, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; help?: string; disabled?: boolean }) {
   return (
-    <div className={`relative flex items-center justify-between py-2 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
-      <span className="text-xs text-text-primary tracking-[0.3px]">
+    <div className={`relative flex items-center justify-between gap-3 py-2 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
+      <span className="min-w-0 text-xs text-text-primary tracking-[0.3px] leading-snug">
         {label}
         {help && <HelpTip text={help} />}
       </span>
@@ -57,18 +57,19 @@ function Toggle({ checked, onChange, label, help, disabled }: { checked: boolean
         type="button"
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-9 items-center rounded transition-colors ${
+        aria-pressed={checked}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
           checked ? 'bg-accent' : 'bg-elevated'
         }`}
       >
         <span
-          className={`inline-block h-3.5 w-3.5 rounded-sm transition-transform ${
-            checked ? 'translate-x-[18px]' : 'translate-x-[3px]'
+          className={`inline-block h-3.5 w-3.5 rounded-full transition-transform ${
+            checked ? 'translate-x-[19px]' : 'translate-x-[3px]'
           }`}
           style={{
             borderWidth: '1px',
             borderStyle: 'solid',
-            borderColor: checked ? '#3096bc' : '#334155',
+            borderColor: checked ? 'var(--color-accent)' : '#334155',
             backgroundColor: checked ? '#fff' : 'rgba(235,236,236,0.3)',
             boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
           }}

@@ -1566,6 +1566,69 @@ def _make_text_labels(
     return recessed_union, embossed_union
 
 
+def _make_insert_text_cutters(
+    config,
+    offset_x: float,
+    offset_y: float,
+    pocket_floor_z: float,
+    insert_height: float,
+    poly_dict: dict,
+    fit_clearance: float = 0.0,
+):
+    """Cutters for embossed text labels inside one tool trace.
+
+    In the bin, embossed labels rise `tl.depth` up from the pocket floor --
+    exactly where the contrast insert sits. To keep the text visible through
+    the insert it is subtracted from the insert's underside: each embossed
+    label inside the polygon becomes a cutter covering the label's z span
+    [pocket_floor, pocket_floor + depth] (clamped to the insert thickness).
+
+    Each cutter is offset OUTWARD by `fit_clearance` (the same insert fit
+    selection that shrinks the insert outline), so the insert material keeps
+    the clearance gap around the raised letters and drops into the pocket
+    without binding on the text. Geometry (position, font, rotation, depth)
+    must match the bin path in _make_text_labels exactly so the cut lands on
+    the raised text.
+    """
+    import manifold3d as mf
+
+    polys = [poly_dict]
+    cutters = []
+    for tl in (config.text_labels or []):
+        if not _label_in_enabled_cell(config, tl.x, tl.y):
+            continue
+        # only labels inside THIS tool trace
+        if not any(
+            _point_in_polygon(tl.x, tl.y, p.get("points", []))
+            for p in polys
+        ):
+            continue
+        cs = _text_to_cross_section(tl.text, tl.font_size)
+        if cs is None:
+            continue
+        try:
+            lx = tl.x + offset_x
+            ly = -(tl.y + offset_y)
+            depth = min(tl.depth, insert_height)
+            cutter_cs = cs
+            if fit_clearance > 0:
+                # round join: glyphs are curvy; a mitre would spike on the
+                # letter corners. offset widens the cutter so the insert
+                # keeps its clearance gap around every stroke.
+                cutter_cs = cs.offset(fit_clearance, mf.JoinType.Round)
+            cutter = (
+                mf.Manifold.extrude(cutter_cs, depth + 0.01)
+                .rotate((0.0, 0.0, -tl.rotation))
+                .translate((lx, ly, pocket_floor_z - 0.01))
+            )
+            cutters.append(cutter)
+        except Exception as e:
+            logger.warning("insert text cutter '%s' failed: %s", tl.text, e)
+    if not cutters:
+        return None
+    return mf.Manifold.batch_boolean(cutters, mf.OpType.Add)
+
+
 def _shrink_rings(
     pts: list[tuple], holes: list[list[tuple]], amount: float
 ) -> list[tuple[list[tuple], list[list[tuple]]]]:
@@ -1801,6 +1864,12 @@ class ManifoldSTLGenerator:
         # the insert must drop into the pocket cut from the same outline; FDM
         # bias makes pockets undersized and positives oversized, so shrink
         fit_clearance = getattr(config, 'insert_clearance', 0.2)
+        # place each insert at its pocket floor: the pocket cutter runs from
+        # wall_top_z - resolved_depth (which already includes insert_height)
+        # down, so the insert's top surface sits exactly where the tool rests
+        wall_top_z = getattr(config, 'height_units', 1) * GF_HEIGHT_UNIT
+        max_depth = _max_pocket_depth(config, wall_top_z)
+        interior_rect = _interior_clip_rect(config)
         shapes = []
         failed = 0
         for poly in polygons:
@@ -1820,6 +1889,15 @@ class ManifoldSTLGenerator:
                 ]
                 if len(shifted_hole) >= 3:
                     shifted_holes.append(shifted_hole)
+
+            # clip to the bin interior before shrinking, exactly like the
+            # pocket cutter, so the insert can never overhang walls where
+            # the pocket was clipped away
+            shifted, shifted_holes = _clip_to_interior(shifted, shifted_holes, interior_rect)
+            if len(shifted) < 3:
+                logger.warning("insert: polygon %s fully clipped to interior", poly.id)
+                failed += 1
+                continue
             ring_sets = [(shifted, shifted_holes)]
             if fit_clearance > 0:
                 ring_sets = _shrink_rings(shifted, shifted_holes, fit_clearance)
@@ -1827,6 +1905,18 @@ class ManifoldSTLGenerator:
                     logger.warning("insert: polygon %s vanished at %.2fmm fit clearance", poly.id, fit_clearance)
                     failed += 1
                     continue
+            pocket_depth = _resolve_pocket_depth(poly.depth_override, config, max_depth)
+            pocket_floor_z = wall_top_z - pocket_depth
+            # embossed labels inside this trace rise from the pocket floor
+            # (exactly where the insert sits); subtract their silhouettes from
+            # the insert's underside so the text in the bin stays visible
+            poly_dict = {
+                "points": [{"x": p[0], "y": p[1]} for p in poly.points_mm]
+            }
+            text_cutters = _make_insert_text_cutters(
+                config, offset_x, offset_y, pocket_floor_z, insert_height, poly_dict,
+                fit_clearance=fit_clearance,
+            )
             made = 0
             try:
                 for piece_pts, piece_holes in ring_sets:
@@ -1838,7 +1928,12 @@ class ManifoldSTLGenerator:
                     if cs.area() <= 0:
                         cs = mf.CrossSection([r[::-1] for r in rings], mf.FillRule.EvenOdd if has_holes else mf.FillRule.Positive)
                     if cs.area() > 0:
-                        shapes.append(mf.Manifold.extrude(cs, insert_height))
+                        piece = mf.Manifold.extrude(cs, insert_height).translate(
+                            (0.0, 0.0, pocket_floor_z)
+                        )
+                        if text_cutters is not None:
+                            piece = piece - text_cutters
+                        shapes.append(piece)
                         made += 1
                 if made == 0:
                     logger.warning("insert: empty cross-section for polygon %s", poly.id)

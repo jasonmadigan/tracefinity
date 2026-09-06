@@ -17,7 +17,10 @@ type CameraView = 'home' | 'top' | 'front' | 'right' | 'fit'
 
 type RenderMode = 'solid' | 'edges'
 
-function StlModel({ url, renderMode, color = '#5ab4de', edgeColor = '#1e3d5c' }: { url: string; renderMode: RenderMode; color?: string; edgeColor?: string }) {
+// translation applied to re-centre a bin-space STL on the scene origin
+interface GeoTransform { x: number; y: number; z: number }
+
+function StlModel({ url, renderMode, color = '#5ab4de', edgeColor = '#1e3d5c', transform, onTransform }: { url: string; renderMode: RenderMode; color?: string; edgeColor?: string; transform?: GeoTransform; onTransform?: (t: GeoTransform) => void }) {
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null)
   const [edgesGeometry, setEdgesGeometry] = useState<THREE.EdgesGeometry | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -38,11 +41,14 @@ function StlModel({ url, renderMode, color = '#5ab4de', edgeColor = '#1e3d5c' }:
 
         geo.computeBoundingBox()
         const box = geo.boundingBox!
-        const centerX = (box.max.x + box.min.x) / 2
-        const centerY = (box.max.y + box.min.y) / 2
-        const minZ = box.min.z
+        const t: GeoTransform = transform ?? {
+          x: (box.max.x + box.min.x) / 2,
+          y: (box.max.y + box.min.y) / 2,
+          z: box.min.z,
+        }
 
-        geo.translate(-centerX, -centerY, -minZ)
+        geo.translate(-t.x, -t.y, -t.z)
+        onTransform?.(t)
         loadedGeo = geo
         loadedEdges = new THREE.EdgesGeometry(geo, 30)
         setGeometry(geo)
@@ -60,7 +66,11 @@ function StlModel({ url, renderMode, color = '#5ab4de', edgeColor = '#1e3d5c' }:
       loadedGeo?.dispose()
       loadedEdges?.dispose()
     }
-  }, [url])
+    // the transform must be settled before the insert loads with it; the
+    // main bin passes no transform and the insert always passes one, so
+    // listening on `transform` alone is sufficient
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, transform])
 
   if (loadError || !geometry) return null
 
@@ -252,6 +262,9 @@ const viewButtons: { view: CameraView; icon: typeof Box; label: string }[] = [
 
 export function BinPreview3D({ stlUrl, splitUrls, insertUrl }: Props) {
   const [renderMode, setRenderMode] = useState<RenderMode>('solid')
+  // bin-space -> scene translation computed from the main bin's bounding box;
+  // the insert shares it so both models land at their true relative positions
+  const [binTransform, setBinTransform] = useState<GeoTransform | null>(null)
   const dispatchView = useCallback((view: CameraView) => {
     window.dispatchEvent(new CustomEvent('bin-preview-view', { detail: view }))
   }, [])
@@ -270,9 +283,14 @@ export function BinPreview3D({ stlUrl, splitUrls, insertUrl }: Props) {
             {splitUrls && splitUrls.length > 0 ? (
               <SplitModels urls={splitUrls} renderMode={renderMode} />
             ) : (
-              <StlModel url={stlUrl} renderMode={renderMode} />
+              <StlModel url={stlUrl} renderMode={renderMode} onTransform={setBinTransform} />
             )}
-            {insertUrl && <StlModel url={insertUrl} renderMode={renderMode} color="#ff8844" edgeColor="#7a3310" />}
+            {/* the insert's STL carries absolute bin-space coordinates; it must
+                be translated with the bin's transform, not centred on its own
+                bounding box, or it loses its position inside the tool pocket */}
+            {insertUrl && binTransform && (
+              <StlModel url={insertUrl} renderMode={renderMode} color="#ff8844" edgeColor="#7a3310" transform={binTransform} />
+            )}
             <CameraController />
           </Bounds>
         </Suspense>
