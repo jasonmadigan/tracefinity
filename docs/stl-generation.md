@@ -46,6 +46,28 @@ record, and `<artefact> not found` otherwise.
 - **Stacking lip top**: lip base + 4.4mm (d0=1.9 + d1=1.8 + d2=0.7). Do NOT use bounding box max Z.
 - **Pocket extrude margin**: 0.01mm epsilon for boolean cleanliness.
 
+## Shell mode (constant-thickness shell)
+
+`shelled` on `BinParams` rebuilds the bin as a **constant-thickness shell** via `_build_shelled_bin` (additive construction — everything not built is open air). Wall thickness is a user-selected slider (1-3mm in 0.2mm steps; clamped into that range when shelled). The bin's **top floor face is removed**; walls trace both the outer perimeter and each tool outline.
+
+Structure (bottom to top):
+
+- **Floor**: the solid tapered base cells keep the standard underside (feet and between-feet grooves stay open, flare chamfer intact), and a **trench floor plate** (`SHELL_TRENCH_PLATE_T` = 0.75mm) sits **on top of** the cells (4.75 → 5.5mm), spanning everything inside the outer wall band. The plate seals the gaps between the tool walls, the outer band and the base cells while leaving the chamfered grooves below it open. The underside (feet, grooves) is unchanged and nothing is cut through.
+- **Outer wall band**: bin perimeter rounded-rect minus the same rect inset by the wall thickness, from the floor to the cavity top. **With a stacking lip** (`shell_exterior_standard`), the band widens to the spec lip wall thickness (`LIP_D0 + LIP_D2` = 2.6mm) and runs all the way to the wall top, so the lip sits on a printable, spec-thick wall instead of floating over a thin shell. The band itself is optional via `shell_exterior_wall` (default on): when off, no band is built and the perimeter terminates flush at the trench floor plate — only the tool wall rings stand (still clipped to the standard gridfinity footprint). The schema forces `shell_exterior_wall = True` when a stacking lip is on, so the lip always has a wall to sit on.
+- **Tool wall rings**: each clipped tool outline buffered **outward** by the wall thickness (shapely mitre buffer), minus the trace itself — the wall hugs the outside of the trace. Overlapping rings merge with each other and the band (cosmetic only). Rings always run to the **wall top** regardless of `shell_exterior_standard`: with a stacking lip the band already runs to the wall top and the lip collar sits above it at the perimeter, so the ring only merges with existing geometry. (Regression note: rings once stopped at the cavity top — 3.8mm below the wall top — when `shell_exterior_standard` was on, leaving tool walls shorter than the rest of the bin.)
+- **Pocket floors**: per tool, a full column of material from the pocket depth down to the trench floor — the same vertical span as the ring walls beside the trace. The cutout depth selection always controls the pocket depth (shell mode or not): `_resolve_pocket_depth` falls back to `config.cutout_depth` unless a per-cutout `depth_override` is set, and `insert_height` still applies on top.
+
+Cavity top: with `shell_exterior_standard` (default) and stacking lip on, the shell stops at `wall_top - (LIP_D3 + LIP_D4)` so the standard ~2.6mm lip collar stays solid. With `false`, it runs to `wall_top` and the lip notch/rim use `min(2.6, wall_thickness)` as the inset (uniform wall through the lip).
+
+Guards and interactions:
+
+- `_max_pocket_depth(config, wall_top_z)` is the single source of truth for the deepest legal pocket: `1.5 + 7 * (height_units - 1)` (`MIN_CUTOUT_DEPTH` plus one height unit per extra unit of bin height), minus the 3.8mm lip notch for solid bins with a stacking lip. The lip deduction is solid-bin-only — in a shelled bin the lip collar sits above the cavity top at the perimeter, so a pocket cutter never touches it.
+- `_build_shelled_bin` returns None (solid fallback + warning) when the bin is too short or the interior too small for the wall thickness.
+- Pocket cutters still run afterwards and are no-ops where the shell pre-opened them; finger holes and chamfers still cut into the rings/pocket floors. Partial-bin cutters compose after the shell body.
+- **Text labels**: surface labels sit on the trench floor plate top; labels inside tool traces sit on the pocket-floor top (both via `_make_text_labels` overrides).
+- **Contrast insert**: the flat insert rests on the trench floor plate top; the tool rests on the insert.
+- **Clip rect**: `_interior_clip_rect` uses the effective wall thickness (lip inset `min(2.6, wall_thickness)` when `shell_exterior_standard = false`).
+
 ## Gridfinity Constants
 
 ```

@@ -35,7 +35,7 @@ function DepthInput({ value, defaultDepth, maxDepth, onCommit, resetKey }: Depth
       setText(value == null ? '' : String(value))
       return
     }
-    const clamped = Math.max(5, Math.min(maxDepth, n))
+    const clamped = Math.max(1.5, Math.min(maxDepth, n))
     setText(String(clamped))
     onCommit(clamped)
   }

@@ -142,6 +142,9 @@ class BinParams(BaseModel):
     stacking_lip: bool = True
     rim_units: int = 0  # extra height units (x7mm) the wall/lip rises above the floor face
     wall_thickness: float = 1.6
+    shelled: bool = False  # hollow the bin interior to save filament
+    shell_exterior_standard: bool = True  # keep gridfinity-standard lip zone vs matched shell thickness
+    shell_exterior_wall: bool = True  # build the outer wall band; off leaves the perimeter at the trench floor
     cutout_depth: float = 20.0
     cutout_clearance: float = 1.0
     insert_enabled: bool = False
@@ -228,6 +231,19 @@ class BinParams(BaseModel):
         if v < 0 or v > 5:
             raise ValueError("cutout chamfer must be between 0 and 5mm")
         return v
+
+    @model_validator(mode="after")
+    def normalize_shell(self) -> "BinParams":
+        if self.shelled:
+            # wall thickness is directly user-selected (1-3mm slider)
+            self.wall_thickness = max(1.0, min(3.0, self.wall_thickness))
+        else:
+            self.shell_exterior_standard = True
+            self.shell_exterior_wall = True
+        if self.stacking_lip:
+            # the stacking lip needs the outer wall band to sit on
+            self.shell_exterior_wall = True
+        return self
 
     @field_validator("wall_thickness")
     @classmethod

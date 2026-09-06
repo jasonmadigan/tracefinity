@@ -41,6 +41,10 @@ CIRCLE_SEGS = 48        # profile corner resolution (2D)
 ROUND_SEGS = 128        # sphere/cylinder resolution (3D cutters)
 TEXT_DPI = 200          # pixels per inch for text rendering
 
+SHELL_TRENCH_PLATE_T = 0.75  # thin floor plate above the base feet tops (shell mode)
+
+MIN_CUTOUT_DEPTH = 1.5  # pocket depth floor; slider gains 7mm per height unit
+
 
 # ── geometry helpers ─────────────────────────────────────────────────────────
 
@@ -109,11 +113,16 @@ def _build_base_unit(outer_w: float, outer_h: float):
     return mf.Manifold.batch_boolean([l0, l1, l2], mf.OpType.Add)
 
 
-def _build_stacking_lip_notch(outer_w: float, outer_h: float):
+def _build_stacking_lip_notch(outer_w: float, outer_h: float, wall_inset: float = LIP_D0 + LIP_D2):
     """
     Inner notch solid to subtract from the stacking lip.
     Built in notch-local coords where z=0 is the bottom of the notch
     (= wall_top - LIP_D3 - LIP_D4 in global coords) and z=8.2 is the top of the lip.
+
+    wall_inset is the horizontal inset of the notch's narrow section from the
+    outer wall. The gridfinity-standard value is LIP_D0+LIP_D2 (2.6mm); shell
+    mode with exterior_standard=False passes the (smaller) shell thickness so
+    the wall runs at uniform thickness through the lip.
 
     Width profile from bottom (z=0) to top (z=8.2):
       z=0:              outer_w  (full outer, notch base)
@@ -126,10 +135,10 @@ def _build_stacking_lip_notch(outer_w: float, outer_h: float):
     import manifold3d as mf
 
     r = GF_CORNER_R
-    nw_inner = outer_w - 2 * (LIP_D0 + LIP_D2)   # 36.3mm
-    nh_inner = outer_h - 2 * (LIP_D0 + LIP_D2)
-    nw_mid = outer_w - 2 * LIP_D0                 # 37.7mm
-    nh_mid = outer_h - 2 * LIP_D0
+    nw_inner = outer_w - 2 * wall_inset   # 36.3mm at standard 2.6mm inset
+    nh_inner = outer_h - 2 * wall_inset
+    nw_mid = outer_w - 2 * min(LIP_D0, wall_inset)                 # 37.7mm at standard
+    nh_mid = outer_h - 2 * min(LIP_D0, wall_inset)
 
     cs_outer = _cs(_rounded_rect_pts(outer_w, outer_h, r))
     cs_inner = _cs(_rounded_rect_pts(nw_inner, nh_inner, r))
@@ -254,6 +263,33 @@ def _effective_grid_span(config: GenerateRequest) -> tuple[int, int]:
     return max_ix - min_ix + 1, max_iy - min_iy + 1
 
 
+def _effective_wall_thickness(config) -> float:
+    """Wall thickness in effect for this bin.
+
+    Reads the (validated) config value directly; wall thickness is a
+    user-selected 1-3mm slider. Kept as a helper so all consumers (clip rect,
+    auto-size, cavity cutter) share one source of truth.
+    """
+    return config.wall_thickness
+
+
+def _is_shelled(config) -> bool:
+    return bool(getattr(config, "shelled", False))
+
+
+def _shell_exterior_standard(config) -> bool:
+    return bool(getattr(config, "shell_exterior_standard", True))
+
+
+def _shell_exterior_wall(config) -> bool:
+    """Whether the shelled bin builds its outer wall band.
+
+    The schema forces this True when stacking_lip is on (the lip needs the
+    band to sit on), so the geometry can trust it unconditionally.
+    """
+    return bool(getattr(config, "shell_exterior_wall", True))
+
+
 def _build_shell(config: GenerateRequest):
     """Solid bin shell: base units + wall body to wall_top_z.
 
@@ -292,6 +328,241 @@ def _build_shell(config: GenerateRequest):
 
     parts = base_units + [wall_body]
     return mf.Manifold.batch_boolean(parts, mf.OpType.Add)
+
+
+def _positive_fill_cs(rings: list):
+    """Build a CrossSection from shapely-derived rings, tolerating CW winding.
+
+    _shapely_to_cross_sections can emit clockwise outer rings (manifold3d's
+    Positive fill rule treats those as empty). Normalize orientation like the
+    polygon-cutout path: flip when the default fill yields no area.
+    """
+    import manifold3d as mf
+
+    has_holes = len(rings) > 1
+    cs = mf.CrossSection(rings, mf.FillRule.EvenOdd) if has_holes else mf.CrossSection(rings)
+    if cs.area() <= 0:
+        cs = mf.CrossSection(
+            [r[::-1] for r in rings],
+            mf.FillRule.EvenOdd if has_holes else mf.FillRule.Positive,
+        )
+    return cs
+
+
+def _build_shelled_base(config: GenerateRequest):
+    """Base units for a shelled bin.
+
+    The standard solid tapered base cells (magnet holes etc. behave as
+    usual); the trench floor plate above them seals the bottom. The
+    full-hollow option was removed from the product.
+    """
+    import manifold3d as mf
+
+    half_grid = getattr(config, "half_grid_base", False)
+    cell_size = GF_HALF_GRID if half_grid else GF_GRID
+    grid_x, grid_y = config.grid_x, config.grid_y
+
+    cells = []
+    for cy, ch in _base_cell_layout(grid_y, cell_size):
+        for cx, cw in _base_cell_layout(grid_x, cell_size):
+            unit = _build_base_unit(cw - 0.5, ch - 0.5)
+            cells.append(unit.translate((cx, cy, 0.0)))
+    return cells
+
+
+def _build_shelled_bin(
+    config: GenerateRequest,
+    polygons: list[ScaledPolygon],
+    wall_top_z: float,
+    offset_x: float,
+    offset_y: float,
+):
+    """Constant-thickness shell body for shelled bins (replaces the solid shell).
+
+    Built additively so everything not listed is open air:
+
+    - base units: solid tapered gridfinity cells whose tops form the trench
+      floor — the grooves between the feet stay open, matching the solid
+      bin's underside. The trench floor plate above them seals the bottom.
+    - outer wall band: bin perimeter inset by the wall thickness, running from
+      the floor to the cavity top (below the lip zone when exterior_standard).
+      Optional (shell_exterior_wall): when off, no band is built and the
+      perimeter terminates flush at the trench floor plate; only the tool
+      wall rings trace the outlines (still clipped to the standard footprint).
+    - tool wall rings: each clipped tool outline offset outward by the wall
+      thickness; the top face of the bin is removed between ring and band.
+    - pocket floors: a full column of material under each pocket, from the
+      pocket depth down to the trench floor — the same vertical span as the
+      ring walls beside them.
+    """
+    import manifold3d as mf
+    from shapely.geometry import Polygon as _SPoly
+    from shapely.validation import make_valid
+
+    t = _effective_wall_thickness(config)
+    trench_floor_z = GF_BASE_HEIGHT
+    cavity_top_z = _shell_cavity_top_z(config, wall_top_z)
+    outer_w = config.grid_x * GF_GRID - 0.5
+    outer_h = config.grid_y * GF_GRID - 0.5
+
+    if cavity_top_z - trench_floor_z < 1.0:
+        logger.warning(
+            "shell: bin too short for shelling (cavity top %.2f, floor %.2f); skipping shell",
+            cavity_top_z, trench_floor_z,
+        )
+        return None
+    if outer_w - 2 * t < 2 * GF_CORNER_R + 2.0 or outer_h - 2 * t < 2 * GF_CORNER_R + 2.0:
+        logger.warning(
+            "shell: bin interior too small for %.2fmm walls; skipping shell", t
+        )
+        return None
+
+    parts: list = []
+    parts.extend(_build_shelled_base(config))
+
+    # trench floor plate: a thin plate sitting ON TOP of the base cells seals
+    # the gaps between the tool walls, the outer band and the base cells,
+    # while the grooves between the feet stay open below it so the flare
+    # chamfer between the feet remains standard.
+    # The plate overlaps the cells below and is overlapped by the rings/slabs
+    # above by 0.01mm so no boolean faces are coplanar (coincident faces
+    # break the union); it is inset 0.1mm from the outer footprint so its
+    # side faces stay strictly inside the wall band material.
+    plate_w = outer_w - 0.2
+    plate_h = outer_h - 0.2
+    parts.append(
+        mf.Manifold.extrude(
+            _cs(_rounded_rect_pts(plate_w, plate_h, GF_CORNER_R)),
+            SHELL_TRENCH_PLATE_T + 0.01,
+        ).translate((0.0, 0.0, trench_floor_z - 0.01))
+    )
+
+    # outer wall band. with a stacking lip the band widens to the spec lip
+    # wall thickness and runs to the wall top so the lip sits on a printable,
+    # spec-thick wall; otherwise it is wall-thickness to the cavity top.
+    # With shell_exterior_wall off no band is built at all: the perimeter
+    # terminates at the trench floor plate (flush top surface), leaving only
+    # the tool wall rings to trace the outlines. The schema forces
+    # shell_exterior_wall True when stacking_lip is on, so a stacking lip
+    # can never float here.
+    if _shell_exterior_wall(config):
+        lip_wall_t = LIP_D0 + LIP_D2  # 2.6mm spec wall under the stacking lip
+        band_t = lip_wall_t if (config.stacking_lip and _shell_exterior_standard(config)) else t
+        band_top_z = wall_top_z if config.stacking_lip else cavity_top_z
+        band_height = band_top_z - trench_floor_z
+        cs_outer = _cs(_rounded_rect_pts(outer_w, outer_h, GF_CORNER_R))
+        cs_band_inner = _cs(
+            _rounded_rect_pts(outer_w - 2 * band_t, outer_h - 2 * band_t, GF_CORNER_R)
+        )
+        band = mf.Manifold.extrude(cs_outer, band_height).translate(
+            (0.0, 0.0, trench_floor_z)
+        ) - mf.Manifold.extrude(cs_band_inner, band_height + 0.01).translate(
+            (0.0, 0.0, trench_floor_z - 0.005)
+        )
+        parts.append(band)
+
+    # tool wall rings and pocket floors
+    interior_rect = _interior_clip_rect(config)
+    # no stacking-lip deduction in shell mode: the lip collar never bounds the
+    # pocket cutter (see _max_pocket_depth)
+    max_depth = _max_pocket_depth(config, wall_top_z)
+    # rings always run to the wall top regardless of shell_exterior_standard:
+    # with a stacking lip the band already runs to the wall top and the lip
+    # collar sits above it at the perimeter, so a ring at wall_top_z only
+    # merges with existing geometry. Shortening the rings under the lip zone
+    # (the old cavity_top_z top) would leave tool walls 3.8mm lower than the
+    # rest of the bin interior for no geometric benefit.
+    # rings overlap the base cells below and the band/lip above by 0.01mm so
+    # no boolean faces are coplanar (coincident faces break the union)
+    ring_top_z = wall_top_z
+    ring_height = ring_top_z - trench_floor_z + 0.02
+    ring_bottom_z = trench_floor_z - 0.01
+
+    for poly in polygons or []:
+        shifted = [(p[0] + offset_x, -(p[1] + offset_y)) for p in poly.points_mm]
+        if len(shifted) < 3:
+            continue
+        shifted_holes = [
+            [(p[0] + offset_x, -(p[1] + offset_y)) for p in hole]
+            for hole in (poly.interior_rings_mm or [])
+        ]
+        shifted, shifted_holes = _clip_to_interior(shifted, shifted_holes, interior_rect)
+        if len(shifted) < 3:
+            continue
+        try:
+            sp = _SPoly(shifted, holes=shifted_holes)
+            if not sp.is_valid:
+                sp = make_valid(sp)
+            trace_rings = _shapely_to_cross_sections(shifted, shifted_holes)
+            if not trace_rings:
+                continue
+            trace_cs = _positive_fill_cs(trace_rings)
+            if trace_cs.area() <= 0:
+                continue
+
+            # ring wall: buffered outline minus the trace itself, then clipped
+            # to just inside the bin outer footprint so thick walls near the
+            # perimeter stay inside the band (coincident faces would break the
+            # boolean; the 0.05mm inset keeps the ring strictly interior)
+            outer_clip = _SPoly(
+                _rounded_rect_pts(outer_w - 0.1, outer_h - 0.1, GF_CORNER_R)
+            )
+            buffered = sp.buffer(t, join_style=2)
+            buffered = buffered.intersection(outer_clip)
+            buf_pieces = (
+                [buffered] if buffered.geom_type == "Polygon"
+                else [g for g in getattr(buffered, "geoms", []) if g.geom_type == "Polygon"]
+            )
+            for piece in buf_pieces:
+                if piece.is_empty or piece.area <= 0:
+                    continue
+                p_out = list(piece.exterior.coords[:-1])
+                p_holes = [list(i.coords[:-1]) for i in piece.interiors]
+                buf_rings = _shapely_to_cross_sections(p_out, p_holes)
+                if not buf_rings:
+                    continue
+                buf_cs = _positive_fill_cs(buf_rings)
+                if buf_cs.area() <= 0:
+                    continue
+                ring = mf.Manifold.extrude(buf_cs, ring_height).translate(
+                    (0.0, 0.0, ring_bottom_z)
+                ) - mf.Manifold.extrude(trace_cs, ring_height + 0.02).translate(
+                    (0.0, 0.0, ring_bottom_z - 0.01)
+                )
+                parts.append(ring)
+
+            # pocket floor: from the pocket depth down to the trench floor, the
+            # same vertical span as the ring walls.
+            depth = _resolve_pocket_depth(poly.depth_override, config, max_depth)
+            slab_top = wall_top_z - depth
+            slab_bottom = trench_floor_z - 0.01
+            if slab_top - slab_bottom >= 0.2:
+                parts.append(
+                    mf.Manifold.extrude(trace_cs, slab_top - slab_bottom).translate(
+                        (0.0, 0.0, slab_bottom)
+                    )
+                )
+        except Exception as e:
+            logger.warning("shell ring/slab failed for polygon %s: %s", poly.id, e)
+
+    body = mf.Manifold.batch_boolean(parts, mf.OpType.Add)
+    if body.is_empty():
+        logger.warning("shell: shelled body came out empty; falling back to solid")
+        return None
+    return body
+
+
+def _shell_cavity_top_z(config: GenerateRequest, wall_top_z: float) -> float:
+    """Top z for the cavity cutter.
+
+    With exterior_standard (default) the cavity stops below the stacking-lip
+    zone so the standard ~2.6mm lip profile survives and bins stack with
+    standard gridfinity bins. With exterior_standard=False the cavity runs to
+    wall_top_z and the lip notch is widened to the shell thickness instead.
+    """
+    if _shell_exterior_standard(config) and config.stacking_lip:
+        return wall_top_z - (LIP_D3 + LIP_D4)
+    return wall_top_z
 
 
 def _bin_top_z(config: GenerateRequest, wall_top_z: float) -> float:
@@ -498,11 +769,16 @@ def _add_lip_features(
     import manifold3d as mf
 
     ox, oy = origin
+    # shell mode with exterior_standard=False runs the shell thickness through
+    # the lip/rim zone instead of the gridfinity-standard 2.6mm inset
+    lip_inset = LIP_D0 + LIP_D2
+    if _is_shelled(config) and not _shell_exterior_standard(config):
+        lip_inset = min(lip_inset, _effective_wall_thickness(config))
     rim_units = (getattr(config, "rim_units", 0) or 0) if config.stacking_lip else 0
     rim_height = rim_units * GF_HEIGHT_UNIT
     lip_base_z = wall_top_z + rim_height
-    rim_inner_w = outer_w - 2 * (LIP_D0 + LIP_D2)
-    rim_inner_h = outer_h - 2 * (LIP_D0 + LIP_D2)
+    rim_inner_w = outer_w - 2 * lip_inset
+    rim_inner_h = outer_h - 2 * lip_inset
     additions = []
 
     if rim_height > 0:
@@ -519,7 +795,7 @@ def _add_lip_features(
         notch_depth_below = LIP_D3 + LIP_D4
         cs_wall_lip = _cs(_rounded_rect_pts(outer_w, outer_h, GF_CORNER_R))
         lip_solid = mf.Manifold.extrude(cs_wall_lip, lip_total).translate((ox, oy, lip_base_z))
-        notch = _build_stacking_lip_notch(outer_w, outer_h).translate(
+        notch = _build_stacking_lip_notch(outer_w, outer_h, lip_inset).translate(
             (ox, oy, lip_base_z - notch_depth_below)
         )
         additions.append(lip_solid - notch)
@@ -539,11 +815,31 @@ def _add_lip_features(
 
 def _resolve_pocket_depth(override: float | None, config, max_depth: float) -> float:
     """Per-feature pocket depth: override → config.cutout_depth fallback,
-    plus insert_height when enabled, clamped to [5, max_depth]."""
+    plus insert_height when enabled, clamped to [MIN_CUTOUT_DEPTH, max_depth].
+
+    The cutout depth selection always controls the pocket depth, shell mode
+    or not."""
     base = override if override is not None else config.cutout_depth
     if getattr(config, 'insert_enabled', False):
         base += getattr(config, 'insert_height', 1.0)
-    return max(5, min(base, max_depth))
+    return max(MIN_CUTOUT_DEPTH, min(base, max_depth))
+
+
+def _max_pocket_depth(config, wall_top_z: float) -> float:
+    """Deepest legal pocket depth for this config.
+
+    The cutout depth slider may span 1.5mm (at 1u height) plus 7mm for every
+    additional height unit: max = 1.5 + 7 * (height_units - 1). Solid bins
+    with a stacking lip deduct the 3.8mm lip notch (LIP_D3 + LIP_D4) that
+    eats into the wall top; shelled bins do NOT deduct the lip — the lip
+    collar is perimeter-only geometry above the cavity top and never bounds
+    the pocket cutter, whose top surface exits through open air inside the
+    collar. The result is clamped so the slider always has a legal range.
+    """
+    depth = MIN_CUTOUT_DEPTH + GF_HEIGHT_UNIT * (config.height_units - 1)
+    if not _is_shelled(config) and config.stacking_lip:
+        depth -= LIP_D3 + LIP_D4
+    return max(MIN_CUTOUT_DEPTH, depth)
 
 
 def _filleted_rect_radius(width: float, pocket_depth: float) -> float:
@@ -786,13 +1082,17 @@ def _interior_clip_rect(config):
     when the stacking lip is enabled its inner profile protrudes inward by
     LIP_D0+LIP_D2 (2.6mm) from the outer wall -- wider than typical wall_thickness.
     use the larger of the two so cutouts never breach the lip zone.
+    in shell mode with exterior_standard=False the lip zone runs at the shell
+    thickness, so the wall thickness governs.
     """
     from shapely.geometry import Polygon as _SPoly
 
     outer_w = config.grid_x * GF_GRID - 0.5
     outer_h = config.grid_y * GF_GRID - 0.5
     lip_inset = (LIP_D0 + LIP_D2) if getattr(config, "stacking_lip", False) else 0.0
-    inset = max(config.wall_thickness, lip_inset)
+    if _is_shelled(config) and not _shell_exterior_standard(config):
+        lip_inset = min(lip_inset, _effective_wall_thickness(config))
+    inset = max(_effective_wall_thickness(config), lip_inset)
     hw = outer_w / 2 - inset
     hh = outer_h / 2 - inset
     return _SPoly([(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
@@ -1200,17 +1500,26 @@ def _make_text_labels(
     offset_y: float,
     pocket_depth: float = 0,
     polygons: list[ScaledPolygon] | None = None,
+    surface_z: float | None = None,
+    cutout_floor_override: float | None = None,
 ):
     """Build manifold solids for text labels. Returns (recessed_cutter, embossed_body).
 
     Labels inside tool cutouts sit at the cutout floor. Labels on the bin
-    surface sit at wall_top_z.
+    surface sit at wall_top_z, unless surface_z is given (shell mode: the
+    cavity floor replaces the removed floor face). cutout_floor_override
+    forces labels inside cutouts to a fixed z (shell "full" mode: the cavity
+    floor, since the pocket region is hollow there).
     """
     import manifold3d as mf
 
     recessed = []
     embossed = []
-    cutout_floor_z = wall_top_z - pocket_depth
+    cutout_floor_z = (
+        cutout_floor_override if cutout_floor_override is not None
+        else wall_top_z - pocket_depth
+    )
+    surface_floor_z = surface_z if surface_z is not None else wall_top_z
     polys = polygons or []
 
     for tl in (config.text_labels or []):
@@ -1229,7 +1538,7 @@ def _make_text_labels(
                 _point_in_polygon(tl.x, tl.y, p.get("points", []))
                 for p in polys
             )
-            base_z = cutout_floor_z if in_cutout else wall_top_z
+            base_z = cutout_floor_z if in_cutout else surface_floor_z
 
             if tl.emboss:
                 solid = (
@@ -1348,8 +1657,15 @@ class ManifoldSTLGenerator:
         partial_shell = _uses_partial_shell(config)
 
         t1 = time.monotonic()
-        bin_body = _build_shell(config)
-        logger.info("shell: %.2fs", time.monotonic() - t1)
+        shelled_body = None
+        if _is_shelled(config):
+            shelled_body = _build_shelled_bin(config, polygons, wall_top_z, offset_x, offset_y)
+        if shelled_body is not None:
+            bin_body = shelled_body
+            logger.info("shelled body: %.2fs", time.monotonic() - t1)
+        else:
+            bin_body = _build_shell(config)
+            logger.info("shell: %.2fs", time.monotonic() - t1)
 
         t1 = time.monotonic()
         bin_body = _add_lip_features(bin_body, config, outer_w, outer_h, wall_top_z)
@@ -1382,9 +1698,8 @@ class ManifoldSTLGenerator:
 
         pocket_depth = 5
         if polygons:
-            floor_z = GF_BASE_HEIGHT
-            lip_deduction = (LIP_D3 + LIP_D4) if config.stacking_lip else 0
-            max_depth = wall_top_z - floor_z - 2 - lip_deduction
+            # shell mode drops the stacking-lip deduction (see _max_pocket_depth)
+            max_depth = _max_pocket_depth(config, wall_top_z)
             # Default pocket_depth still tracks the global cutout_depth; per-cutout
             # overrides are resolved inside the cutter functions.
             pocket_depth = _resolve_pocket_depth(None, config, max_depth)
@@ -1421,6 +1736,13 @@ class ManifoldSTLGenerator:
                 if polygons
                 else []
             )
+            # shell mode: the top floor face is removed, so surface labels sit
+            # on the trench floor instead: the top of the trench floor plate
+            # above the base cells. Labels inside tool traces sit on the
+            # pocket slab top in both modes.
+            shell_floor_z = None
+            if _is_shelled(config):
+                shell_floor_z = GF_BASE_HEIGHT + SHELL_TRENCH_PLATE_T
             recessed, embossed = _make_text_labels(
                 config,
                 wall_top_z,
@@ -1429,6 +1751,8 @@ class ManifoldSTLGenerator:
                 offset_y,
                 pocket_depth,
                 polygons=poly_dicts,
+                surface_z=shell_floor_z,
+                cutout_floor_override=shell_floor_z if shell_floor_z is not None else None,
             )
             if recessed:
                 cutters.append(recessed)
