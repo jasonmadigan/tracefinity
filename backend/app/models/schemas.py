@@ -142,6 +142,7 @@ class BinParams(BaseModel):
     stacking_lip: bool = True
     rim_units: int = 0  # extra height units (x7mm) the wall/lip rises above the floor face
     wall_thickness: float = 1.6
+    shell_floor_plate: float = 0.75  # trench floor plate thickness (shelled mode)
     shelled: bool = False  # hollow the bin interior to save filament
     shell_exterior_standard: bool = True  # keep gridfinity-standard lip zone vs matched shell thickness
     shell_exterior_wall: bool = True  # build the outer wall band; off leaves the perimeter at the trench floor
@@ -238,12 +239,20 @@ class BinParams(BaseModel):
             # wall thickness is directly user-selected (1-3mm slider)
             self.wall_thickness = max(1.0, min(3.0, self.wall_thickness))
         else:
+            self.shell_floor_plate = 0.75
             self.shell_exterior_standard = True
             self.shell_exterior_wall = True
         if self.stacking_lip:
             # the stacking lip needs the outer wall band to sit on
             self.shell_exterior_wall = True
         return self
+
+    @field_validator("shell_floor_plate")
+    @classmethod
+    def validate_shell_floor_plate(cls, v: float) -> float:
+        if v < 0.4 or v > 20:
+            raise ValueError("shell floor plate must be between 0.4 and 20mm")
+        return v
 
     @field_validator("wall_thickness")
     @classmethod

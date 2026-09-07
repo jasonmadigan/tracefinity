@@ -36,9 +36,10 @@ Gridfinity is a modular storage system where bins snap into a baseplate grid. Ea
 
 **Retain outer wall** -- keeps the outer bin wall around the full perimeter when connect base is on.
 
-**Shell (less filament)** -- rebuilds the bin as a constant-thickness shell: walls trace the outside of the bin and the outside of each tool outline, and the top surface between them is open. Saves filament and print time. With the standard base a thin floor plate (0.75mm) above the feet seals the bottom. Unlike solid bins, the stacking lip does **not** reduce shell-mode pocket depth — the lip collar is perimeter-only and never bounds the pockets. When on, one new setting appears:
+**Shell** -- rebuilds the bin as a constant-thickness shell: walls trace the outside of the bin and the outside of each tool outline, and the top surface between them is open. Saves filament and print time. With the standard base a floor plate above the feet (default 0.75mm) seals the bottom. Unlike solid bins, the stacking lip does **not** reduce shell-mode pocket depth — the lip collar is perimeter-only and never bounds the pockets. When on, these settings appear:
 
 - **Wall Thickness** -- direct slider from 1-3mm in 0.2mm steps.
+- **Shell Depth** -- how deep the open shell interior extends below the wall top; the remaining height seals as a floor plate. Snaps in 0.5mm increments and uses the same range rule as Cutout Depth: 1.5mm minimum, max = 1.5 + 7 × (height − 1) at the selected bin height. Higher depth = thinner floor plate = less filament.
 
 Two sub-options control the shell shape:
 

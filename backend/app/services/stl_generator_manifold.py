@@ -41,7 +41,7 @@ CIRCLE_SEGS = 48        # profile corner resolution (2D)
 ROUND_SEGS = 128        # sphere/cylinder resolution (3D cutters)
 TEXT_DPI = 200          # pixels per inch for text rendering
 
-SHELL_TRENCH_PLATE_T = 0.75  # thin floor plate above the base feet tops (shell mode)
+SHELL_TRENCH_PLATE_T = 0.75  # default floor plate thickness above the base feet tops (shell mode)
 
 MIN_CUTOUT_DEPTH = 1.5  # pocket depth floor; slider gains 7mm per height unit
 
@@ -369,6 +369,11 @@ def _build_shelled_base(config: GenerateRequest):
     return cells
 
 
+def _shell_floor_plate_t(config: GenerateRequest) -> float:
+    """Trench floor plate thickness in effect (user-selected 0.4-20mm slider)."""
+    return max(0.4, min(float(getattr(config, "shell_floor_plate", SHELL_TRENCH_PLATE_T)), 20.0))
+
+
 def _build_shelled_bin(
     config: GenerateRequest,
     polygons: list[ScaledPolygon],
@@ -400,14 +405,16 @@ def _build_shelled_bin(
 
     t = _effective_wall_thickness(config)
     trench_floor_z = GF_BASE_HEIGHT
+    plate_t = _shell_floor_plate_t(config)
     cavity_top_z = _shell_cavity_top_z(config, wall_top_z)
     outer_w = config.grid_x * GF_GRID - 0.5
     outer_h = config.grid_y * GF_GRID - 0.5
 
-    if cavity_top_z - trench_floor_z < 1.0:
+    # cavity must clear the plate plus 1mm of open trench above it
+    if cavity_top_z - trench_floor_z - plate_t < 1.0:
         logger.warning(
-            "shell: bin too short for shelling (cavity top %.2f, floor %.2f); skipping shell",
-            cavity_top_z, trench_floor_z,
+            "shell: bin too short for shelling (cavity top %.2f, floor %.2f, plate %.2f); skipping shell",
+            cavity_top_z, trench_floor_z, plate_t,
         )
         return None
     if outer_w - 2 * t < 2 * GF_CORNER_R + 2.0 or outer_h - 2 * t < 2 * GF_CORNER_R + 2.0:
@@ -432,7 +439,7 @@ def _build_shelled_bin(
     parts.append(
         mf.Manifold.extrude(
             _cs(_rounded_rect_pts(plate_w, plate_h, GF_CORNER_R)),
-            SHELL_TRENCH_PLATE_T + 0.01,
+            plate_t + 0.01,
         ).translate((0.0, 0.0, trench_floor_z - 0.01))
     )
 
@@ -1507,8 +1514,10 @@ def _make_text_labels(
     Labels inside tool cutouts sit at the cutout floor. Labels on the bin
     surface sit at wall_top_z, unless surface_z is given (shell mode: the
     cavity floor replaces the removed floor face). cutout_floor_override
-    forces labels inside cutouts to a fixed z (shell "full" mode: the cavity
-    floor, since the pocket region is hollow there).
+    forces labels inside cutouts to a fixed z — only for shell variants
+    that leave the pocket region hollow; the standard shelled bin builds
+    a solid pocket slab under each trace, so its labels must sit on the
+    slab top (wall_top_z - depth) instead.
     """
     import manifold3d as mf
 
@@ -1804,7 +1813,7 @@ class ManifoldSTLGenerator:
             # pocket slab top in both modes.
             shell_floor_z = None
             if _is_shelled(config):
-                shell_floor_z = GF_BASE_HEIGHT + SHELL_TRENCH_PLATE_T
+                shell_floor_z = GF_BASE_HEIGHT + _shell_floor_plate_t(config)
             recessed, embossed = _make_text_labels(
                 config,
                 wall_top_z,
@@ -1814,7 +1823,6 @@ class ManifoldSTLGenerator:
                 pocket_depth,
                 polygons=poly_dicts,
                 surface_z=shell_floor_z,
-                cutout_floor_override=shell_floor_z if shell_floor_z is not None else None,
             )
             if recessed:
                 cutters.append(recessed)

@@ -71,6 +71,33 @@ def test_unshelled_keeps_wall_thickness_and_resets_shell_options():
     assert config.shell_exterior_wall is True
 
 
+def test_shelled_floor_plate_defaults_and_resets():
+    config = _config(shelled=True)
+    assert config.shell_floor_plate == pytest.approx(0.75)
+    # unshelled resets the plate to the default
+    config = _config(shelled=False, shell_floor_plate=5.0)
+    assert config.shell_floor_plate == pytest.approx(0.75)
+
+
+def test_bin_generate_route_passes_floor_plate_through():
+    """Regression: the /bins/{id}/generate route built GenerateRequest
+    field-by-field and dropped shell_floor_plate, so the slider had no
+    effect on generated STLs. The route must forward the value."""
+    import inspect
+
+    from app.api import routes
+
+    source = inspect.getsource(routes.generate_bin_stl)
+    assert "shell_floor_plate=bc.shell_floor_plate" in source
+
+
+def test_shelled_floor_plate_validation():
+    with pytest.raises(ValueError):
+        _config(shelled=True, shell_floor_plate=0.1)
+    with pytest.raises(ValueError):
+        _config(shelled=True, shell_floor_plate=21.0)
+
+
 def test_stacking_lip_forces_exterior_wall_on():
     """The stacking lip needs the outer wall band to sit on: turning the
     exterior wall off with the lip enabled must normalize back to True."""
@@ -417,6 +444,40 @@ def test_shelled_matched_exterior_watertight(tmp_path):
     assert _load_mesh(path).is_watertight
 
 
+def test_shelled_floor_plate_thickness_configurable(tmp_path):
+    """The trench floor plate thickness follows config.shell_floor_plate
+    instead of the 0.75mm default: a 2.0mm plate is solid mid-plate and the
+    section just above its top is open (walls only)."""
+    gen = ManifoldSTLGenerator()
+    plate_t = 2.0
+    path = str(tmp_path / "floor2mm.stl")
+    gen.generate_bin([], _config(shelled=True, shell_floor_plate=plate_t), path)
+    mesh = _load_mesh(path)
+    assert mesh.is_watertight
+
+    plate_top = GF_BASE_HEIGHT + plate_t
+    # mid-plate: nearly the full footprint is solid
+    section = mesh.section(plane_origin=[0, 0, GF_BASE_HEIGHT + plate_t / 2], plane_normal=[0, 0, 1])
+    assert section is not None
+    total_area = sum(p.area for p in section.to_planar()[0].polygons_full)
+    assert total_area > 0.9 * 83.5 * 83.5
+    # just above the plate top: open trench (walls only)
+    section = mesh.section(plane_origin=[0, 0, plate_top + 0.3], plane_normal=[0, 0, 1])
+    polys = section.to_planar()[0].polygons_full
+    total_area = sum(p.area for p in polys)
+    assert total_area < 0.2 * 83.5 * 83.5
+
+
+def test_shelled_thick_plate_too_short_falls_back_to_solid(tmp_path):
+    """A plate thicker than the cavity allows triggers the solid-bin
+    fallback instead of a broken shell."""
+    gen = ManifoldSTLGenerator()
+    path = str(tmp_path / "fallback.stl")
+    gen.generate_bin([], _config(shelled=True, height_units=1, shell_floor_plate=19.0), path)
+    mesh = _load_mesh(path)
+    assert mesh.is_watertight
+
+
 def test_shelled_with_text_labels(tmp_path):
     gen = ManifoldSTLGenerator()
     config = _config(
@@ -426,6 +487,40 @@ def test_shelled_with_text_labels(tmp_path):
     path = str(tmp_path / "shell_text.stl")
     bin_body, _ = gen.generate_bin([], config, path)
     assert not bin_body.is_empty()
+
+
+def test_shelled_recessed_label_inside_pocket_sits_on_slab(tmp_path):
+    """Regressions: in shell mode the pocket slab is solid, so a recessed
+    label inside a tool trace must cut into the slab top (wall_top_z -
+    pocket_depth), not the trench floor plate. Previously the cutter was
+    forced to the trench floor and engraved below the slab, so no text
+    appeared at the pocket base."""
+    import trimesh
+
+    label = TextLabel(
+        id="t1", text="X", x=5.0, y=5.0, font_size=4, depth=0.6, emboss=False
+    )
+    config = _config(
+        shelled=True,
+        cutout_depth=3.0,
+        text_labels=[label],
+    )
+    path = str(tmp_path / "shell_pocket_text.stl")
+    gen = ManifoldSTLGenerator()
+    gen.generate_bin([_square_poly()], config, path)
+    mesh = trimesh.load(path)
+
+    wall_top = config.height_units * GF_HEIGHT_UNIT
+    slab_top = wall_top - 3.0
+    # STL coords are centred on the bin: label (x=5,y=5) in a 2x2 grid maps
+    # to (-37, 37) (y flipped, offset by half the 84mm footprint)
+    lx, ly = 5.0 - 42.0, -(5.0 - 42.0)
+    # the recess is carved INTO the slab: material below the recess bottom...
+    assert mesh.contains([[lx, ly, slab_top - 0.65]])[0]
+    # ...removed inside the recess (0.6mm-deep cutter)...
+    assert not mesh.contains([[lx, ly, slab_top - 0.3]])[0]
+    # ...and solid again just below the trench floor plate top
+    assert mesh.contains([[lx, ly, slab_top - 1.2]])[0]
 
 
 def test_small_shelled_bin_watertight(tmp_path):

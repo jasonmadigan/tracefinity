@@ -16,6 +16,7 @@ export const FACTORY_BIN_CONFIG: BinConfig = {
   stacking_lip: true,
   rim_units: 0,
   wall_thickness: 1.6,
+  shell_floor_plate: 0.75,
   shelled: false,
   shell_exterior_standard: true,
   shell_exterior_wall: true,

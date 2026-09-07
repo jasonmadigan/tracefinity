@@ -2167,6 +2167,7 @@ def generate_bin_stl(request: Request, bin_id: str, user_id: str = Depends(get_u
         stacking_lip=bc.stacking_lip,
         rim_units=bc.rim_units,
         wall_thickness=bc.wall_thickness,
+        shell_floor_plate=bc.shell_floor_plate,
         shelled=bc.shelled,
         shell_exterior_standard=bc.shell_exterior_standard,
         shell_exterior_wall=bc.shell_exterior_wall,

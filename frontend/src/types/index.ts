@@ -138,6 +138,7 @@ export interface BinDefaults {
   stacking_lip: boolean
   rim_units: number
   wall_thickness: number
+  shell_floor_plate: number
   shelled: boolean
   shell_exterior_standard: boolean
   shell_exterior_wall: boolean
