@@ -1,6 +1,6 @@
 """Tests for per-cutout depth override in stl_generator_manifold."""
 from app.models.schemas import BinParams
-from app.services.stl_generator_manifold import _resolve_pocket_depth
+from app.services.stl_generator_manifold import MIN_CUTOUT_DEPTH, _resolve_pocket_depth
 
 
 class TestResolvePocketDepth:
@@ -14,7 +14,9 @@ class TestResolvePocketDepth:
 
     def test_override_clamped_to_min(self):
         bp = BinParams(cutout_depth=20)
-        assert _resolve_pocket_depth(2, bp, max_depth=100) == 5.0
+        assert _resolve_pocket_depth(1.0, bp, max_depth=100) == MIN_CUTOUT_DEPTH
+        # values above the floor pass through unchanged
+        assert _resolve_pocket_depth(2, bp, max_depth=100) == 2.0
 
     def test_override_clamped_to_max(self):
         bp = BinParams(cutout_depth=20)
@@ -38,4 +40,11 @@ class TestResolvePocketDepth:
 
     def test_zero_override_is_clamped_to_min(self):
         bp = BinParams(cutout_depth=20)
-        assert _resolve_pocket_depth(0, bp, max_depth=100) == 5.0
+        assert _resolve_pocket_depth(0, bp, max_depth=100) == MIN_CUTOUT_DEPTH
+
+    def test_shelled_respects_cutout_depth_selection(self):
+        """The cutout depth selection controls pocket depth in shell mode too."""
+        bp = BinParams(cutout_depth=7, shelled=True)
+        assert _resolve_pocket_depth(None, bp, max_depth=50) == 7.0
+        # override still takes precedence
+        assert _resolve_pocket_depth(3, bp, max_depth=50) == 3.0

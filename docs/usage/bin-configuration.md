@@ -9,7 +9,7 @@ Gridfinity is a modular storage system where bins snap into a baseplate grid. Ea
 | Grid width | 1-25 u | 2 | Each unit is 42mm; the grid footprint is limited to 100 cells |
 | Grid depth | 1-25 u | 2 | The available maximum adjusts with the width |
 | Height | 1-20 u | 4 | Each unit is 7mm + 4.75mm base |
-| Cutout depth | 5mm-max | 20mm | Max depends on height and stacking lip |
+| Cutout depth | 1.5mm-max | 20mm | Min 1.5mm; the max grows 7mm per extra height unit (reduced by the stacking lip on solid bins) |
 | Clearance | 0-5mm | 1.0mm | Gap around tool outlines |
 | Cutout chamfer | 0-3mm | 0mm | Bevel on top edge of pockets |
 | Magnet diameter | 3-10mm | 6mm | Standard Gridfinity magnets are 6x2mm |
@@ -35,6 +35,18 @@ Gridfinity is a modular storage system where bins snap into a baseplate grid. Ea
 **Connect Base** -- disabled cells keep the base plate connected instead of being fully removed.
 
 **Retain outer wall** -- keeps the outer bin wall around the full perimeter when connect base is on.
+
+**Shell** -- rebuilds the bin as a constant-thickness shell: walls trace the outside of the bin and the outside of each tool outline, and the top surface between them is open. Saves filament and print time. With the standard base a floor plate above the feet (default 0.75mm) seals the bottom. Unlike solid bins, the stacking lip does **not** reduce shell-mode pocket depth — the lip collar is perimeter-only and never bounds the pockets. When on, these settings appear:
+
+- **Wall Thickness** -- direct slider from 1-3mm in 0.2mm steps.
+- **Shell Depth** -- how deep the open shell interior extends below the wall top; the remaining height seals as a floor plate. Snaps in 0.5mm increments and uses the same range rule as Cutout Depth: 1.5mm minimum, max = 1.5 + 7 × (height − 1) at the selected bin height. Higher depth = thinner floor plate = less filament.
+
+Two sub-options control the shell shape:
+
+- **Exterior Wall** -- builds the outer wall band around the bin perimeter. Turn off to drop it, leaving the perimeter flush at the trench floor height with only the tool walls standing (saves more filament; the print is no longer enclosed). Locked on while the stacking lip is enabled — the lip needs a wall to sit on.
+- **Gridfinity Standard Exterior** -- keeps the standard stacking-lip profile (~2.6mm solid collar below the lip) so bins stack with any Gridfinity bin. Off runs the shell wall thickness all the way up through the lip, using slightly less filament but with a non-standard stacking surface. Hidden while the exterior wall is off.
+
+**Contrast insert** -- generates a separate STL to print in a different colour. The pocket is deepened automatically to accommodate the insert thickness. In shell mode the insert is the same flat tool-shape print; it rests on the bin floor and the tool rests on top of it.
 
 ## Auto grid sizing
 

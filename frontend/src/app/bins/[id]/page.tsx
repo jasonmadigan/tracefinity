@@ -586,7 +586,7 @@ export default function BinPage() {
                 partialBinsValues={config.partial_bins_values}
                 wallThickness={config.wall_thickness}
                 defaultCutoutDepth={config.cutout_depth}
-                maxCutoutDepth={calcMaxCutoutDepth(config.height_units, config.stacking_lip)}
+                maxCutoutDepth={calcMaxCutoutDepth(config.height_units, config.stacking_lip, config.shelled)}
                 halfGridBase={config.half_grid_base}
                 onEditTool={(toolId) => router.push(projectSource.scopedHref(`/tools/${toolId}`))}
                 smoothedToolIds={smoothedToolIds}

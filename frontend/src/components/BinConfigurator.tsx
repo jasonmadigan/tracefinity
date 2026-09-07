@@ -11,14 +11,37 @@ import { ClassValue } from 'clsx'
 import { useTheme } from '@/hooks/useTheme'
 
 const GF_HEIGHT_UNIT = 7.0
-const GF_BASE_HEIGHT = 4.75
 // lip_d3 (1.2) + lip_d4 (2.6)
 const LIP_NOTCH_DEPTH = 3.8
+// depth floor at 1u height; every extra unit adds one height unit (7mm)
+const MIN_CUTOUT_DEPTH = 1.5
+// solid base height below the open shell interior
+const GF_BASE_HEIGHT = 4.75
+// floor plate thickness bounds (shelled mode)
+const MIN_FLOOR_PLATE = 0.4
+// Shell Depth slider snaps in 0.5mm increments
+const SHELL_DEPTH_STEP = 0.5
 
-export function calcMaxCutoutDepth(heightUnits: number, stackingLip: boolean): number {
-  const wallTopZ = heightUnits * GF_HEIGHT_UNIT
-  const lipDeduction = stackingLip ? LIP_NOTCH_DEPTH : 0
-  return Math.max(5, wallTopZ - GF_BASE_HEIGHT - 2 - lipDeduction)
+export function calcMaxCutoutDepth(
+  heightUnits: number,
+  stackingLip: boolean,
+  shelled: boolean = false,
+): number {
+  // shell mode has no lip-notch deduction: the lip collar is perimeter-only
+  // geometry and never bounds the pocket depth (mirrors _max_pocket_depth)
+  const lipDeduction = stackingLip && !shelled ? LIP_NOTCH_DEPTH : 0
+  const depth = MIN_CUTOUT_DEPTH + GF_HEIGHT_UNIT * (heightUnits - 1) - lipDeduction
+  return Math.max(MIN_CUTOUT_DEPTH, depth)
+}
+
+// Shell Depth is the complement of the floor plate thickness: the open
+// cavity below the wall top. plate = wall_top - base_height - shell_depth.
+function shellDepthToPlate(depth: number, heightUnits: number): number {
+  return GF_HEIGHT_UNIT * heightUnits - GF_BASE_HEIGHT - depth
+}
+
+function plateToShellDepth(plate: number, heightUnits: number): number {
+  return GF_HEIGHT_UNIT * heightUnits - GF_BASE_HEIGHT - plate
 }
 
 interface Props {
@@ -41,8 +64,8 @@ function HelpTip({ text }: { text: string }) {
 
 function Toggle({ checked, onChange, label, help, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; help?: string; disabled?: boolean }) {
   return (
-    <div className={`relative flex items-center justify-between py-2 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
-      <span className="text-xs text-text-primary tracking-[0.3px]">
+    <div className={`relative flex items-center justify-between gap-3 py-2 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
+      <span className="min-w-0 text-xs text-text-primary tracking-[0.3px] leading-snug">
         {label}
         {help && <HelpTip text={help} />}
       </span>
@@ -50,18 +73,19 @@ function Toggle({ checked, onChange, label, help, disabled }: { checked: boolean
         type="button"
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-9 items-center rounded transition-colors ${
+        aria-pressed={checked}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
           checked ? 'bg-accent' : 'bg-elevated'
         }`}
       >
         <span
-          className={`inline-block h-3.5 w-3.5 rounded-sm transition-transform ${
-            checked ? 'translate-x-[18px]' : 'translate-x-[3px]'
+          className={`inline-block h-3.5 w-3.5 rounded-full transition-transform ${
+            checked ? 'translate-x-[19px]' : 'translate-x-[3px]'
           }`}
           style={{
             borderWidth: '1px',
             borderStyle: 'solid',
-            borderColor: checked ? '#3096bc' : '#334155',
+            borderColor: checked ? 'var(--color-accent)' : '#334155',
             backgroundColor: checked ? '#fff' : 'rgba(235,236,236,0.3)',
             boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
           }}
@@ -168,7 +192,12 @@ export function BinConfigurator({ config, onChange, autoSize, onAutoSizeChange }
     onChange({ ...config, ...partial })
   }
 
-  const maxCutoutDepth = calcMaxCutoutDepth(config.height_units, config.stacking_lip)
+  const maxCutoutDepth = calcMaxCutoutDepth(config.height_units, config.stacking_lip, config.shelled)
+  // shell depth uses the same range rule as cutout depth: min 1.5mm, max
+  // 1.5 + 7 × (height − 1) minus the lip notch when the stacking lip is on
+  const shellDepthMin = MIN_CUTOUT_DEPTH
+  const shellDepthMax = maxCutoutDepth
+  const shellDepth = plateToShellDepth(config.shell_floor_plate, config.height_units)
   const binWidth = config.grid_x * 42
   const binDepth = config.grid_y * 42
   const needsSplit = config.bed_size > 0 && (binWidth > config.bed_size || binDepth > config.bed_size)
@@ -227,16 +256,21 @@ export function BinConfigurator({ config, onChange, autoSize, onAutoSizeChange }
         max={20}
         unit="u"
         onChange={(v) => {
-          const newMax = calcMaxCutoutDepth(v, config.stacking_lip)
-          update({ height_units: v, cutout_depth: Math.min(config.cutout_depth, newMax) })
+          const newMax = calcMaxCutoutDepth(v, config.stacking_lip, config.shelled)
+          const depth = Math.min(Math.max(plateToShellDepth(config.shell_floor_plate, v), MIN_CUTOUT_DEPTH), newMax)
+          update({
+            height_units: v,
+            cutout_depth: Math.min(config.cutout_depth, newMax),
+            shell_floor_plate: shellDepthToPlate(depth, v),
+          })
         }}
       />
 
       <SliderRow
         label="Cutout Depth"
-        help={`How deep the tool pocket is cut into the bin. Max ${maxCutoutDepth.toFixed(1)}mm at ${config.height_units}u height.`}
+        help={`How deep the tool pocket is cut into the bin. Range ${MIN_CUTOUT_DEPTH.toFixed(1)}–${maxCutoutDepth.toFixed(1)}mm at ${config.height_units}u height${config.stacking_lip && !config.shelled ? ' (with stacking lip)' : ''}.`}
         value={Math.min(config.cutout_depth, maxCutoutDepth)}
-        min={5}
+        min={MIN_CUTOUT_DEPTH}
         max={maxCutoutDepth}
         step={0.5}
         unit="mm"
@@ -315,10 +349,12 @@ export function BinConfigurator({ config, onChange, autoSize, onAutoSizeChange }
         <Toggle
           checked={config.stacking_lip}
           onChange={(v) => {
-            const newMax = calcMaxCutoutDepth(config.height_units, v)
+            const newMax = calcMaxCutoutDepth(config.height_units, v, config.shelled)
             update({
               stacking_lip: v,
               rim_units: v ? config.rim_units : 0,
+              // the stacking lip needs the outer wall band to sit on
+              shell_exterior_wall: v ? true : config.shell_exterior_wall,
               cutout_depth: Math.min(config.cutout_depth, newMax),
             })
           }}
@@ -336,6 +372,62 @@ export function BinConfigurator({ config, onChange, autoSize, onAutoSizeChange }
               unit="u"
               onChange={(v) => update({ rim_units: v })}
             />
+          </div>
+        )}
+        <Toggle
+          checked={config.shelled}
+          onChange={(v) => {
+            const maxDepth = calcMaxCutoutDepth(config.height_units, config.stacking_lip, true)
+            const depth = Math.min(Math.max(plateToShellDepth(config.shell_floor_plate, config.height_units), MIN_CUTOUT_DEPTH), maxDepth)
+            update({
+              shelled: v,
+              wall_thickness: v ? Math.min(3, Math.max(1, config.wall_thickness)) : 1.6,
+              shell_floor_plate: v ? shellDepthToPlate(depth, config.height_units) : 0.75,
+            })
+          }}
+          label="Shell"
+          help="Builds the bin as a constant-thickness shell: walls around the tools and around the outside, with the top surface open between them. Saves filament and print time. With the standard base a thin floor above the feet seals the bottom."
+        />
+        {config.shelled && (
+          <div className="pl-3 border-l border-border-subtle ml-1 space-y-0">
+            <SliderRow
+              label="Wall Thickness"
+              help="Thickness of the shell walls."
+              value={config.wall_thickness}
+              min={1}
+              max={3}
+              step={0.2}
+              unit="mm"
+              onChange={(v) => update({ wall_thickness: v })}
+            />
+            <SliderRow
+              label="Shell Depth"
+              help={`How deep the open shell interior extends below the wall top; the rest seals as a floor plate. Range ${shellDepthMin.toFixed(1)}–${shellDepthMax.toFixed(1)}mm at ${config.height_units}u height${config.stacking_lip ? ' (with stacking lip)' : ''}.`}
+              value={Math.min(Math.max(shellDepth, shellDepthMin), shellDepthMax)}
+              min={shellDepthMin}
+              max={shellDepthMax}
+              step={SHELL_DEPTH_STEP}
+              unit="mm"
+              onChange={(v) => {
+                const plate = Math.max(shellDepthToPlate(v, config.height_units), MIN_FLOOR_PLATE)
+                update({ shell_floor_plate: plate })
+              }}
+            />
+            <Toggle
+              checked={config.stacking_lip ? true : config.shell_exterior_wall}
+              onChange={(v) => update({ shell_exterior_wall: v })}
+              label="Exterior Wall"
+              disabled={config.stacking_lip}
+              help="Builds the outer wall band around the bin perimeter. Turn off to drop it, leaving the perimeter flush at the trench floor height with only the tool walls standing. Locked on while Stacking lip is enabled — the lip needs a wall to sit on."
+            />
+            {(config.shell_exterior_wall || config.stacking_lip) && (
+              <Toggle
+                checked={config.shell_exterior_standard}
+                onChange={(v) => update({ shell_exterior_standard: v })}
+                label="Gridfinity Standard Exterior"
+                help="Keeps the standard stacking-lip profile at the top so bins stack with any gridfinity bin. Off runs the shell thickness all the way up through the lip (minimum filament, non-standard stacking)."
+              />
+            )}
           </div>
         )}
         <Toggle

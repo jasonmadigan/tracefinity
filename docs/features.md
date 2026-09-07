@@ -50,13 +50,14 @@ Reference for AI agents. Check here before suggesting new features or claiming s
 
 - Grid sizing (width/depth in gridfinity units, 1-25 per axis and 100 cells total, with 0.5-unit increments for 21mm half-grid)
 - Bin height in units (7mm each + 4.75mm base)
-- Cutout depth (5mm to max)
+- Cutout depth (1.5mm at 1u height; the max grows 7mm per extra height unit)
 - Clearance (0-5mm extra space around tools)
 - Cutout chamfer toggle
 - Magnet holes (enable/disable, diameter and depth)
 - Magnets at corners only option
 - Stacking lip toggle
 - Raise lip (extend wall/lip above the floor face in 7mm units so a stacked bin clears a protruding tool)
+- Shell mode (hollow interior to minimise filament; direct 1-3mm wall thickness slider with exterior wall and Gridfinity-standard-exterior sub-options)
 - Half-grid base (21mm cells for finer baseplate positioning)
 - Insert mode (contrast insert with configurable height)
 - Bed size for auto-splitting large bins

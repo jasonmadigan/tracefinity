@@ -78,6 +78,7 @@ The sidebar controls all bin parameters:
 | Magnet holes | Holes in the base for magnets. Configurable diameter and depth. |
 | Corners only | Place magnet holes at the four outer corners only. |
 | Stacking lip | Raised rim for stacking bins. |
+| Exterior wall (shell) | Outer wall band around the bin perimeter. Off leaves the perimeter flush at the trench floor with only tool walls standing. Locked on while the stacking lip is on. |
 | Contrast Insert | Generates a separate insert STL for two-colour printing. |
 | Insert Height | Thickness of the insert piece. |
 | Bed Size | Print bed dimension. Bins exceeding this are split automatically. |
